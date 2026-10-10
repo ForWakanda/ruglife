@@ -14,6 +14,7 @@ import { Store } from "./store.js";
 import { Table } from "./tables.js";
 import { Settlement } from "./settlement.js";
 import { EscrowLink } from "./escrow-link.js";
+import { rebuildRecords, type Records } from "./record.js";
 
 export interface Session { id: string; address: Address | null; nonce: string | null; nonceAt: number; createdAt: number; lastSeen: number }
 export interface EscrowOpts { rpc: string; chainId: number; escrow: Address; chog: Address; signerKey: Hex; submitterKey?: Hex }
@@ -27,6 +28,9 @@ export function startServer(opts: ServerOpts = {}) {
   const sessions = new Map<string, Session>(Object.entries(store.readJson<Record<string, Session>>("sessions.json", {})));
   const pilots = new Map<string, PilotKey & { owner: Address }>(Object.entries(store.readJson<Record<string, PilotKey & { owner: Address }>>("pilots.json", {})));
   const tables = new Map<string, Table>();
+  let records: Records | null = null;
+  const dataDir = opts.dataDir ?? join(process.cwd(), "data");
+  const recordsNow = (): Records => { if (!records) records = rebuildRecords(dataDir); return records; };
   const escrowOpts = opts.escrow === undefined ? escrowFromEnv() : opts.escrow;
   const settlement = escrowOpts ? new Settlement({ rpc: escrowOpts.rpc, chainId: escrowOpts.chainId, escrow: escrowOpts.escrow, signerKey: escrowOpts.signerKey, ...(escrowOpts.submitterKey ? { submitterKey: escrowOpts.submitterKey } : {}), store, log }) : null;
   if (settlement) log(`escrow ${escrowOpts!.escrow} on chain ${escrowOpts!.chainId}; result signer ${settlement.signer.address}; submitter ${settlement.submitter.address}`);
@@ -120,7 +124,7 @@ export function startServer(opts: ServerOpts = {}) {
         return send(ws, tableList(s.id));
       case "create": {
         const t = new Table({ host: s.id, mode: msg.mode, store, ...(msg.name ? { name: msg.name.slice(0, 40) } : {}), ...(msg.timers !== undefined ? { timers: msg.timers } : {}) });
-        t.onChange = () => broadcastTables();
+        t.onChange = () => { if (t.status === "over") records = null; broadcastTables(); };
         tables.set(t.id, t);
         attach(ws, t);
         send(ws, { type: "table", table: t.info(s.id) });
@@ -164,7 +168,8 @@ export function startServer(opts: ServerOpts = {}) {
             const link = new EscrowLink(settlement, escrowOpts!.chog, tb.id, rows, tb.tutorial, log);
             link.start(() => tb.state?.seq ?? 0, () => tb.allEvents, () => broadcastTables());
             return link;
-          } : null);
+          } : null, Object.fromEntries(t.seats.map((x) => [String(x.seat), x.session ? sessions.get(x.session)?.address ?? null : null])));
+          records = null; // rebuilt lazily on the next read
         } catch (e) { return err(ws, "start", (e as Error).message); }
         log(`table ${t.id} started: ${t.seats.map((x) => `${x.kind}:${token(x.tokenId).name}`).join(" ")}`);
         return broadcastTables();
@@ -239,6 +244,15 @@ export function startServer(opts: ServerOpts = {}) {
     const url = (req.url ?? "/").split("?")[0]!;
     if (url === "/health") { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ ok: true, tables: tables.size, sessions: sessions.size, sockets: sockets.size })); return; }
     if (url === "/api/tables") { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify((tableList() as { tables: unknown }).tables)); return; }
+    const rec = /^\/api\/record\/(\d+)$/.exec(url);
+    if (rec) {
+      if ([...tables.values()].some((t) => t.status === "over" && t.state && Date.now() - t.createdAt < 5000)) records = null;
+      const r = recordsNow().get(Number(rec[1]));
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(r ?? { tokenId: Number(rec[1]), games: 0, wins: 0, levelsGained: 0, rugsPulled: 0, rugsSuffered: 0, bountiesCollected: 0, appearances: 0, wonBeside: {}, history: [] }));
+      return;
+    }
+    if (url === "/api/records") { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify([...recordsNow().values()].filter((r) => r.games > 0).sort((a, b) => b.wins - a.wins || b.levelsGained - a.levelsGained).slice(0, 100))); return; }
     if (!existsSync(staticDir)) { res.writeHead(200, { "content-type": "text/plain" }); res.end("RUG LIFE server. No client built yet."); return; }
     let p = normalize(join(staticDir, url === "/" ? "index.html" : url));
     if (!p.startsWith(staticDir)) { res.writeHead(403); res.end(); return; }

@@ -109,7 +109,7 @@ export class Table {
     else this.onChange?.(this);
   }
 
-  start(session: string, escrowFactory: ((t: Table) => EscrowLink) | null = null): void {
+  start(session: string, escrowFactory: ((t: Table) => EscrowLink) | null = null, controllers: Record<string, string | null> = {}): void {
     if (this.state) throw new Error("already started");
     if (session !== this.host) throw new Error("only the host starts");
     if (this.seats.length < 2) throw new Error("two seats at least");
@@ -120,7 +120,7 @@ export class Table {
     };
     this.state = createGame(config);
     this.allEvents = [];
-    this.store.tableLog(this.id, { t: "created", at: Date.now(), config: { ...config, seed: undefined }, seedHash: this.state.seedHash, seats: this.seats.map((s) => ({ ...s, session: undefined })) });
+    this.store.tableLog(this.id, { t: "created", at: Date.now(), config: { ...config, seed: undefined }, seedHash: this.state.seedHash, seats: this.seats.map((s) => ({ ...s, session: undefined })), controllers, tutorial: this.tutorial });
     if (escrowFactory) this.escrow = escrowFactory(this);
     this.broadcast([]);
     this.pump();
