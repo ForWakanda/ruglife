@@ -12,7 +12,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc -p packages/protocol --noEmit && tsc -p packages/cards --noEmit && tsc -p packages/engine --noEmit",
+    "typecheck": "tsc -p packages/protocol --noEmit && tsc -p packages/cards --noEmit && tsc -p packages/engine --noEmit && tsc -p packages/server --noEmit",
+    "server": "tsx packages/server/src/index.ts",
     "sim": "tsx packages/engine/src/cli.ts",
     "tokens": "node packages/cards/scripts/build-token-table.mjs"
   },

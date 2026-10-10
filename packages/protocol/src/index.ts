@@ -252,13 +252,37 @@ export interface View {
   seq: number;
 }
 
-// ---- wire protocol (tech-design § 3) ----
+// ---- wire protocol (tech-design § 3; lobby/sign-in messages added 2026-10-10 by Claude, additive) ----
+export interface TableInfo {
+  id: string;
+  name: string;
+  mode: GameConfig["mode"];
+  status: "open" | "playing" | "over";
+  host: string; // session id of the creator
+  seats: Array<{ seat: SeatId; kind: SeatKind; tokenId: number; name: string; label: string; you?: boolean }>;
+  maxSeats: number;
+  timers: boolean;
+  createdAt: number;
+}
 export type ClientMsg =
   | { type: "hello"; session: string | null }
-  | { type: "act"; table: string; action: Action; clientSeq: number }
+  | { type: "nonce" }
+  | { type: "signin"; message: string; signature: `0x${string}` }
+  | { type: "pilot"; tokenId: number; pilot: `0x${string}`; expires: number; nonce: number; signature: `0x${string}` }
+  | { type: "list" }
+  | { type: "create"; mode: GameConfig["mode"]; name?: string; timers?: boolean }
+  | { type: "sit"; table: string; seat?: SeatId; tokenId?: number; loaner?: boolean }
+  | { type: "addBot"; table: string }
+  | { type: "leave"; table: string }
+  | { type: "start"; table: string }
   | { type: "watch"; table: string }
-  | { type: "sit"; table: string; seat: SeatId; tokenId?: number; loaner?: boolean };
+  | { type: "act"; table: string; action: Action; clientSeq: number };
 export type ServerMsg =
-  | { type: "welcome"; session: string; address: string | null }
+  | { type: "welcome"; session: string; address: `0x${string}` | null }
+  | { type: "nonce"; nonce: string; domain: string; uri: string; chainId: number }
+  | { type: "signedIn"; address: `0x${string}` }
+  | { type: "pilotOk"; tokenId: number; pilot: `0x${string}`; expires: number }
+  | { type: "tables"; tables: TableInfo[] }
+  | { type: "table"; table: TableInfo }
   | { type: "view"; table: string; view: View; events: SeqEvent[] }
   | { type: "error"; code: string; detail?: string };

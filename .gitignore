@@ -7,3 +7,5 @@ packages/client/dist/
 contracts/out/
 contracts/cache/
 contracts/broadcast/
+
+tsconfig.tsbuildinfo
