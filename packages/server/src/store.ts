@@ -9,6 +9,9 @@ export class Store {
   tableLog(id: string, row: unknown): void {
     appendFileSync(join(this.dir, "tables", `${id}.jsonl`), JSON.stringify(row) + "\n");
   }
+  appendRow(file: string, row: unknown): void {
+    appendFileSync(join(this.dir, file), JSON.stringify(row) + "\n");
+  }
   readJson<T>(name: string, fallback: T): T {
     const p = join(this.dir, name);
     if (!existsSync(p)) return fallback;
