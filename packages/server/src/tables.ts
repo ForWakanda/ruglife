@@ -4,6 +4,7 @@ import type { Action, GameConfig, SeatId, SeatKind, SeqEvent, TableInfo, View } 
 import { apply, botAction, createGame, DEFAULT_CARD_SET, IllegalAction, legalActions, viewFor, type GameState, token } from "@ruglife/engine";
 import { tokens } from "@ruglife/cards";
 import type { Store } from "./store.js";
+import { eventDigestOf, type EscrowLink } from "./escrow-link.js";
 
 export const MAX_SEATS = 6;
 export const DEADLINES = { priority: 20_000, prompt: 30_000, turn: 60_000, lobby: 120_000 } as const; // ⚙ rules § 5–6
@@ -37,6 +38,9 @@ export class Table {
   private deadlineSeat: SeatId | null = null;
   private pumping = false;
   onChange: ((t: Table) => void) | null = null;
+  escrow: EscrowLink | null = null; // set by the server at start when an escrow is configured
+  tutorial = false;
+  allEvents: SeqEvent[] = [];
 
   constructor(opts: { host: string; mode: GameConfig["mode"]; name?: string; timers?: boolean; store: Store; id?: string }) {
     this.id = opts.id ?? randomBytes(4).toString("hex");
@@ -53,6 +57,7 @@ export class Table {
     return {
       id: this.id, name: this.name, mode: this.mode, status: this.status, host: this.host, maxSeats: MAX_SEATS, timers: this.timers, createdAt: this.createdAt,
       seats: this.seats.map((s) => ({ seat: s.seat, kind: s.kind, tokenId: s.tokenId, name: token(s.tokenId).name, label: s.label, ...(forSession && s.session === forSession ? { you: true } : {}) })),
+      ...(this.escrow ? { escrow: this.escrow.info() } : {}),
     };
   }
   seatOfSession(session: string): SeatId | null {
@@ -104,7 +109,7 @@ export class Table {
     else this.onChange?.(this);
   }
 
-  start(session: string): void {
+  start(session: string, escrowFactory: ((t: Table) => EscrowLink) | null = null): void {
     if (this.state) throw new Error("already started");
     if (session !== this.host) throw new Error("only the host starts");
     if (this.seats.length < 2) throw new Error("two seats at least");
@@ -114,7 +119,9 @@ export class Table {
       seats: this.seats.map((s) => ({ seat: s.seat, kind: s.kind, tokenId: s.tokenId, label: s.label })),
     };
     this.state = createGame(config);
+    this.allEvents = [];
     this.store.tableLog(this.id, { t: "created", at: Date.now(), config: { ...config, seed: undefined }, seedHash: this.state.seedHash, seats: this.seats.map((s) => ({ ...s, session: undefined })) });
+    if (escrowFactory) this.escrow = escrowFactory(this);
     this.broadcast([]);
     this.pump();
   }
@@ -132,12 +139,27 @@ export class Table {
     const r = apply(this.state, action);
     this.state = r.state;
     this.store.tableLog(this.id, { t: "act", at: Date.now(), action, events: r.events });
-    this.broadcast(r.events);
-    if (this.state.phase === "over") this.store.tableLog(this.id, { t: "over", at: Date.now(), winner: this.state.winner, seed: this.state.seed, digest: (r.events.find((e) => e.ev.t === "GameOver")?.ev as { digest?: string })?.digest });
+    this.afterEvents(r.events);
     this.pump();
     return r.events;
   }
 
+  private afterEvents(events: SeqEvent[]): void {
+    this.allEvents.push(...events);
+    this.escrow?.onEvents(this.allEvents);
+    this.broadcast(events);
+    if (this.state!.phase === "over") {
+      const digest = (events.find((e) => e.ev.t === "GameOver")?.ev as { digest?: string })?.digest ?? "";
+      this.store.tableLog(this.id, { t: "over", at: Date.now(), winner: this.state!.winner, seed: this.state!.seed, digest });
+      if (this.escrow) {
+        const link = this.escrow;
+        void link.settleAll(this.state!.winner!, this.allEvents, eventDigestOf(digest)).then((results) => {
+          for (const r of results) this.store.tableLog(this.id, { t: "settled", at: Date.now(), ...r });
+          this.onChange?.(this);
+        }).catch((e) => this.store.tableLog(this.id, { t: "settleError", at: Date.now(), error: String((e as Error).message) }));
+      }
+    }
+  }
   /** Who must act now (seats). */
   actors(): SeatId[] {
     const s = this.state!;
@@ -170,8 +192,7 @@ export class Table {
         const r = apply(this.state, a);
         this.state = r.state;
         this.store.tableLog(this.id, { t: "act", at: Date.now(), action: a, events: r.events, auto: true });
-        this.broadcast(r.events);
-        if (this.state.phase === "over") this.store.tableLog(this.id, { t: "over", at: Date.now(), winner: this.state.winner, seed: this.state.seed, digest: (r.events.find((e) => e.ev.t === "GameOver")?.ev as { digest?: string })?.digest });
+        this.afterEvents(r.events);
       }
     } finally {
       this.pumping = false;
@@ -218,5 +239,5 @@ export class Table {
       try { w.send({ type: "view", table: this.id, view: viewFor(this.state, seat ?? "stands"), events }); } catch { /* a dead socket is dropped by the server */ }
     }
   }
-  stop(): void { if (this.timer) clearTimeout(this.timer); this.timer = null; }
+  stop(): void { if (this.timer) clearTimeout(this.timer); this.timer = null; this.escrow?.stop(); }
 }

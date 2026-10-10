@@ -263,6 +263,17 @@ export interface TableInfo {
   maxSeats: number;
   timers: boolean;
   createdAt: number;
+  /** $CHOG escrow ids for this table (present once the game has started and the server has an escrow). The client funds these directly from the wallet. */
+  escrow?: {
+    address: `0x${string}`;
+    chainId: number;
+    chog: `0x${string}`;
+    potId: `0x${string}`;
+    expiry: number; // unix seconds; every deposit into an id must carry the id's expiry
+    eligible: boolean; // false for bot-only, loaner-only and tutorial tables: nothing is ever settled from them
+    bounties: Array<{ seat: SeatId; tokenId: number; trigger: "hit" | "rug"; id: `0x${string}`; funded: string; active: boolean }>;
+    pot: { funded: string };
+  };
 }
 export type ClientMsg =
   | { type: "hello"; session: string | null }

@@ -16,7 +16,7 @@ export interface SettleRequest { id: Hex; winnerTokenId: number; eventDigest: He
 export type SettleOutcome = { status: "paid"; txHash: Hex | null; reconciled: boolean } | { status: "empty" } | { status: "failed"; error: string };
 
 export const potId = (tableId: string): Hex => keccak256(toBytes(`RUG LIFE pot ${tableId}`));
-export const bountyId = (tableId: string, targetTokenId: number, trigger: "hit" | "rug", n: number): Hex => keccak256(toBytes(`RUG LIFE bounty ${tableId} ${targetTokenId} ${trigger} ${n}`));
+export const bountyId = (tableId: string, targetTokenId: number, trigger: "hit" | "rug"): Hex => keccak256(toBytes(`RUG LIFE bounty ${tableId} ${targetTokenId} ${trigger}`));
 
 export class Settlement {
   readonly chain: Chain;

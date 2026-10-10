@@ -12,9 +12,12 @@ import type { Address, Hex } from "viem";
 import { ownerOf, OWNER_TTL_MS, verifyPilot, verifySiwe, type PilotKey } from "./chain.js";
 import { Store } from "./store.js";
 import { Table } from "./tables.js";
+import { Settlement } from "./settlement.js";
+import { EscrowLink } from "./escrow-link.js";
 
 export interface Session { id: string; address: Address | null; nonce: string | null; nonceAt: number; createdAt: number; lastSeen: number }
-export interface ServerOpts { port?: number; dataDir?: string; domain?: string; uri?: string; staticDir?: string; ownerPoll?: boolean; log?: (line: string) => void }
+export interface EscrowOpts { rpc: string; chainId: number; escrow: Address; chog: Address; signerKey: Hex; submitterKey?: Hex }
+export interface ServerOpts { port?: number; dataDir?: string; domain?: string; uri?: string; staticDir?: string; ownerPoll?: boolean; log?: (line: string) => void; escrow?: EscrowOpts | null }
 
 export function startServer(opts: ServerOpts = {}) {
   const store = new Store(opts.dataDir ?? join(process.cwd(), "data"));
@@ -24,6 +27,10 @@ export function startServer(opts: ServerOpts = {}) {
   const sessions = new Map<string, Session>(Object.entries(store.readJson<Record<string, Session>>("sessions.json", {})));
   const pilots = new Map<string, PilotKey & { owner: Address }>(Object.entries(store.readJson<Record<string, PilotKey & { owner: Address }>>("pilots.json", {})));
   const tables = new Map<string, Table>();
+  const escrowOpts = opts.escrow === undefined ? escrowFromEnv() : opts.escrow;
+  const settlement = escrowOpts ? new Settlement({ rpc: escrowOpts.rpc, chainId: escrowOpts.chainId, escrow: escrowOpts.escrow, signerKey: escrowOpts.signerKey, ...(escrowOpts.submitterKey ? { submitterKey: escrowOpts.submitterKey } : {}), store, log }) : null;
+  if (settlement) log(`escrow ${escrowOpts!.escrow} on chain ${escrowOpts!.chainId}; result signer ${settlement.signer.address}; submitter ${settlement.submitter.address}`);
+  else log("no escrow configured (RUGLIFE_ESCROW / RUGLIFE_SIGNER_KEY unset): pots and bounties are off");
   const sockets = new Map<WebSocket, { session: Session | null; watching: Set<string> }>();
   const persistSessions = (): void => store.writeJson("sessions.json", Object.fromEntries(sessions));
   const persistPilots = (): void => store.writeJson("pilots.json", Object.fromEntries(pilots));
@@ -151,7 +158,14 @@ export function startServer(opts: ServerOpts = {}) {
       case "start": {
         const t = tables.get(msg.table);
         if (!t) return err(ws, "table");
-        try { t.start(s.id); } catch (e) { return err(ws, "start", (e as Error).message); }
+        try {
+          t.start(s.id, settlement ? (tb) => {
+            const rows = tb.seats.map((x) => ({ seat: x.seat, kind: x.kind, tokenId: x.tokenId, address: x.session ? sessions.get(x.session)?.address ?? null : null }));
+            const link = new EscrowLink(settlement, escrowOpts!.chog, tb.id, rows, tb.tutorial, log);
+            link.start(() => tb.state?.seq ?? 0, () => tb.allEvents, () => broadcastTables());
+            return link;
+          } : null);
+        } catch (e) { return err(ws, "start", (e as Error).message); }
         log(`table ${t.id} started: ${t.seats.map((x) => `${x.kind}:${token(x.tokenId).name}`).join(" ")}`);
         return broadcastTables();
       }
@@ -243,6 +257,14 @@ export function startServer(opts: ServerOpts = {}) {
 }
 
 const short = (a: string): string => `${a.slice(0, 6)}…${a.slice(-4)}`;
+function escrowFromEnv(): EscrowOpts | null {
+  const escrow = process.env.RUGLIFE_ESCROW as Address | undefined;
+  const signerKey = process.env.RUGLIFE_SIGNER_KEY as Hex | undefined;
+  const chog = (process.env.RUGLIFE_CHOG ?? "0x350035555E10d9AfAF1566AaebfCeD5BA6C27777") as Address;
+  if (!escrow || !signerKey) return null;
+  const submitterKey = process.env.RUGLIFE_SUBMITTER_KEY as Hex | undefined;
+  return { rpc: process.env.MONAD_RPC ?? "https://rpc.monad.xyz", chainId: Number(process.env.RUGLIFE_CHAIN_ID ?? CHAIN_ID), escrow, chog, signerKey, ...(submitterKey ? { submitterKey } : {}) };
+}
 
 if (process.argv[1] && /packages\/server\/src\/index\.ts$/.test(process.argv[1])) startServer();
 export type { SeatId };
