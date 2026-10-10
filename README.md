@@ -13,7 +13,8 @@ Your Chog's eyes decide your job. The whole collection is the deck. Every rug go
 | `packages/protocol` | the types everything imports: actions, events, views, card rows, the wire protocol |
 | `packages/engine` | the rules — pure and deterministic; `createGame · legalActions · apply · viewFor · botAction` |
 | `packages/cards` | the card set and the per-token role table built from the collection's metadata |
-| `packages/server` | tables, sockets, sign-in, ownership checks, settlement (in progress) |
+| `packages/server` | tables, one WebSocket, EIP-4361 sign-in, pilot keys, `ownerOf` checks, bots and deadlines, the escrow link and settlement, the record |
+| `contracts/` | Foundry: `RugLifeEscrow` (pots and bounties in $CHOG paid to a Chog's token-bound chest) and `SeasonStamp` (deployed off) |
 | `fixtures/` | recorded games (config + actions + digest) that must replay byte-identically |
 
 ## Run it
@@ -24,6 +25,25 @@ npm test                      # rules fixtures, invariants over bot games, recor
 npm run sim -- --seats 4 --mode standard --games 20     # bot tables; --verbose prints every action and event
 npm run sim -- --seats 6 --mode tournament --games 1 --verbose
 ```
+
+### Server
+
+```sh
+npm run server                # :8795 by default; PORT, RUGLIFE_DOMAIN (the SIWE domain), RUGLIFE_URI
+curl localhost:8795/health
+```
+
+Pots and bounties switch on when an escrow is configured: `RUGLIFE_ESCROW` (the deployed `RugLifeEscrow`), `RUGLIFE_SIGNER_KEY` (the result signer — a key that holds gas and nothing else), optional `RUGLIFE_SUBMITTER_KEY`, `MONAD_RPC`. Without them tables still play and nothing is settled. The server never holds or moves $CHOG; funders deposit from their own wallets into the ids the server publishes per table, and the server only signs results.
+
+### Contracts
+
+```sh
+cd contracts
+forge build && forge test                                   # unit tests on mocks
+forge test --match-contract ForkTest --fork-url https://rpc.monad.xyz   # the real registry, proxy and $CHOG on a Monad fork
+```
+
+`git clone --recurse-submodules` (forge-std is a submodule). The server tests read `contracts/out`, so build the contracts first; two of them spawn a local `anvil`.
 
 `npm run tokens` rebuilds `packages/cards/src/tokens.json` from a local mirror of the collection's metadata (default `~/chogathon-prep/collection/metadata`). The role table must reproduce the counts Face 551 · Safecracker 277 · Muscle 277 · Lookout 267 · Sob Story 267 · Hacker 208 · Degen 112 · Legend 10 and the published hash; the tests check both.
 
