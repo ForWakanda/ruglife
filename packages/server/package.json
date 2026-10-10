@@ -1,0 +1,3 @@
+{ "name": "@ruglife/server", "version": "0.0.1", "type": "module", "main": "./src/index.ts", "types": "./src/index.ts",
+  "dependencies": { "@ruglife/protocol": "*", "@ruglife/engine": "*", "@ruglife/cards": "*", "ws": "^8.22.0", "viem": "^2.57.4" },
+  "devDependencies": { "@types/ws": "^8.18.1" } }

@@ -1,0 +1,27 @@
+{
+  "name": "ruglife",
+  "private": true,
+  "version": "0.0.1",
+  "description": "RUG LIFE — a live, spectated table game for the Chog World Order (Chogathon 2026).",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p packages/protocol --noEmit && tsc -p packages/cards --noEmit && tsc -p packages/engine --noEmit",
+    "sim": "tsx packages/engine/src/cli.ts",
+    "tokens": "node packages/cards/scripts/build-token-table.mjs"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.3",
+    "tsx": "^4.23.15"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

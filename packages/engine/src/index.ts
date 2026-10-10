@@ -1,0 +1,12 @@
+export * from "./state.js";
+export * from "./rules.js";
+export * from "./view.js";
+export * from "./bot.js";
+export { sha256Hex, stableStringify } from "./sha256.js";
+import { cardSetV0, tokens, validateCardSet } from "@ruglife/cards";
+import { registerCardSet, registerTokens, SUPPORTED_EFFECTS } from "./state.js";
+const errs = validateCardSet(cardSetV0, SUPPORTED_EFFECTS);
+if (errs.length) throw new Error(`card set ${cardSetV0.id} invalid:\n${errs.join("\n")}`);
+registerCardSet(cardSetV0);
+registerTokens(tokens.tokens);
+export const DEFAULT_CARD_SET = cardSetV0.id;
