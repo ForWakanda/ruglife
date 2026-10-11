@@ -35,6 +35,15 @@ curl localhost:8795/health
 
 Pots and bounties switch on when an escrow is configured: `RUGLIFE_ESCROW` (the deployed `RugLifeEscrow`), `RUGLIFE_SIGNER_KEY` (the result signer — a key that holds gas and nothing else), optional `RUGLIFE_SUBMITTER_KEY`, `MONAD_RPC`. Without them tables still play and nothing is settled. The server never holds or moves $CHOG; funders deposit from their own wallets into the ids the server publishes per table, and the server only signs results.
 
+### Client
+
+```sh
+npm run build      # Vite build → packages/client/dist (the server serves it at /)
+npm run client     # dev server on :5173 that talks to the game server on :8795
+```
+
+`packages/client` is React + Vite with `viem` for the wallet (no wagmi: an injected EIP-1193 wallet, sign-in by EIP-4361, pilot keys by EIP-712, $CHOG funding by permit + one transaction). It never computes rules: it renders `View` and offers `view.legal`. Screens: the lobby (tables, your Chogs read from the chain, loaners, bots, pilot keys), the table (seats, the fight panel, your hand, prompts for help / the sealed Rug / airdrops / trades, the stands with the pot and bounties, the news ticker), GLOBAL ALERT on a win, the Chog sheet (`#/chog/<tokenId>`), and Practice (`#/practice`): a real engine game in the browser against two bots with a stacked deal and a coach, labelled practice, writes nothing. Card pictures are the collection's own images from the project's IPFS gateway, by marketplace number.
+
 ### Contracts
 
 ```sh

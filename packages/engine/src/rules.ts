@@ -416,6 +416,8 @@ function timeout(ctx: Ctx, a: Extract<Action, { type: "TIMEOUT" }>): void {
   if (s.phase === "lobby") {
     if (me.role === "legend" && me.playRole === null) return run({ type: "PICK_ROLE", seat, role: "face" });
     if (me.skin === null) return run({ type: "PICK_SKIN", seat, skin: "pink" });
+    // the host sat on the deal: the table deals itself rather than handing the host to autopilot
+    if (seat === s.seats[0]!.seat && s.prompt === null) return run({ type: "START_GAME", seat });
     return fail(a, "nothing pending");
   }
   if (s.prompt?.seats.includes(seat)) {
