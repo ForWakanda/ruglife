@@ -1,5 +1,6 @@
 // Card and Chog rendering. The picture on every card is a real Chog from the collection (CardView.cast).
 import type { CardView, ChogRef, Role, RoleOrLegend } from "@ruglife/protocol";
+import { ART } from "./art.js";
 
 const GATEWAY = "https://chog-genesis.mypinata.cloud/ipfs/bafybeihau2egcccbdxymeckmmbrqytbfor5gkt3en6d5fsbueymdbq7g6e";
 /** The marketplace number is the file name. */
@@ -33,13 +34,13 @@ export function Card({ card, small, onClick, selected, badge, cancelled, classNa
   return (
     <div className={cls} onClick={onClick} role={onClick ? "button" : undefined} title={d.text}>
       <div className="frame"><span>{d.type === "threat" && (d.levelsWon ?? 1) > 1 ? "BOSS" : d.type.toUpperCase()}</span><span>{top}</span></div>
-      {card.cast.file > 0 ? <img src={imageUrl(card.cast.file)} alt="" loading="lazy" /> : null}
+      {ART.has(d.id) ? <img src={`/art/${d.id}.webp`} alt="" loading="lazy" /> : card.cast.file > 0 ? <img src={imageUrl(card.cast.file)} alt="" loading="lazy" /> : null}
       <div className="body">
         <div className="name">{d.name}</div>
         {!small && d.flavour ? <div className="flav">{d.flavour}</div> : null}
         <div className="text">{d.text}</div>
       </div>
-      {card.cast.file > 0 ? <div className="cast">starring {card.cast.name}</div> : null}
+      {!ART.has(d.id) && card.cast.file > 0 ? <div className="cast">starring {card.cast.name}</div> : null}
       {badge ? <span className="stamp badge">{badge}</span> : null}
     </div>
   );
