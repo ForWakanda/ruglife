@@ -7,7 +7,9 @@ import type { Store } from "./store.js";
 import { eventDigestOf, type EscrowLink } from "./escrow-link.js";
 
 export const MAX_SEATS = 6;
-export const DEADLINES = { priority: 20_000, prompt: 30_000, turn: 60_000, lobby: 120_000 } as const; // ⚙ rules § 5–6
+export const DEADLINES = { priority: 30_000, prompt: 30_000, turn: 60_000, lobby: 120_000 } as const; // ⚙ rules § 5–6; priority 20 s → 30 s 2026-10-12 (the first human table timed out twice while reading)
+/** ⚙ Bots act one move per beat on clocked tables so humans can follow; a pass is quicker. Instant on `timers:false` tables and in tests. */
+export const BOT_PACE = { move: 1_400, pass: 600 } as const;
 
 export interface LobbySeat { seat: SeatId; kind: SeatKind; tokenId: number; session: string | null; label: string }
 export interface Watcher { session: string; seat: SeatId | null; send: (msg: { type: "view"; table: string; view: View; events: SeqEvent[] }) => void }
@@ -179,8 +181,14 @@ export class Table {
     const x = this.state!.seats.find((y) => y.seat === seat)!;
     return x.kind === "bot" || x.autopilot;
   }
-  /** Runs bots/autopilot seats until a human must act, then arms that human's deadline. */
+  /** Runs bots/autopilot seats until a human must act, then arms that human's deadline. On clocked tables each bot move lands one beat
+   *  apart (BOT_PACE) and the table is published after every move, so the humans see the game happen; otherwise it runs instantly. */
   pump(): void {
+    if (this.pumpTimer) return; // a beat is already scheduled; it continues from the new state
+    this.step();
+  }
+  private pumpTimer: ReturnType<typeof setTimeout> | null = null;
+  private step(): void {
     if (this.pumping || !this.state) return;
     this.pumping = true;
     try {
@@ -193,6 +201,12 @@ export class Table {
         this.state = r.state;
         this.store.tableLog(this.id, { t: "act", at: Date.now(), action: a, events: r.events, auto: true });
         this.afterEvents(r.events);
+        if (this.timers && this.state.phase !== "over") {
+          const pace = a.type === "PASS" || a.type === "TIMEOUT" ? BOT_PACE.pass : BOT_PACE.move;
+          this.pumpTimer = setTimeout(() => { this.pumpTimer = null; this.step(); }, pace);
+          this.pumpTimer.unref?.();
+          break;
+        }
       }
     } finally {
       this.pumping = false;
@@ -239,5 +253,5 @@ export class Table {
       try { w.send({ type: "view", table: this.id, view: viewFor(this.state, seat ?? "stands"), events }); } catch { /* a dead socket is dropped by the server */ }
     }
   }
-  stop(): void { if (this.timer) clearTimeout(this.timer); this.timer = null; this.escrow?.stop(); }
+  stop(): void { if (this.timer) clearTimeout(this.timer); this.timer = null; if (this.pumpTimer) clearTimeout(this.pumpTimer); this.pumpTimer = null; this.escrow?.stop(); }
 }

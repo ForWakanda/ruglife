@@ -5,6 +5,7 @@ import { tokenById } from "@ruglife/cards";
 import { request, send, useNet } from "./net.js";
 import { chogsOf, hasWallet, registerPilot, signIn } from "./wallet.js";
 import { imageUrl, roleLabel } from "./cards.js";
+import { HowToPlay } from "./coach.js";
 
 const PICK_KEY = "ruglife.chog";
 
@@ -55,9 +56,12 @@ export function Lobby() {
   const over = net.tables.filter((t) => t.status === "over");
   const myTable = net.tables.find((t) => t.seats.some((s) => s.you) && t.status !== "over");
 
+  const [rules, setRules] = useState(false);
   return (
     <div className="grid2">
       <div className="col">
+        {rules ? <HowToPlay onClose={() => setRules(false)} /> : null}
+        <div className="panel newhere"><h2>New here?</h2><div className="row"><span>Two minutes at the practice table teaches the whole game: a fight, a Lock, a helper, a Rug.</span><a className="btn big green" href="#/practice">Practice first</a><button className="btn ghost" onClick={() => setRules(true)}>How to play</button></div></div>
         {myTable ? <div className="panel" style={{ borderColor: "var(--yellow)" }}><h2>You are seated</h2><div className="row"><span className="name">{myTable.name}</span><button className="btn" onClick={() => go(myTable.id)}>Back to the table</button></div></div> : null}
         <div className="panel">
           <h2>Tables</h2>

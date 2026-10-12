@@ -75,7 +75,7 @@ async function playOut(label, maxClicks) {
   const seen = new Set();
   let clicks = 0, idle = 0;
   const started = Date.now();
-  while (clicks < maxClicks && Date.now() - started < 240_000) {
+  while (clicks < maxClicks && Date.now() - started < 900_000) {
     const did = await step(seen);
     if (did === "GLOBAL ALERT") { log(`${label}: GLOBAL ALERT after ${clicks} clicks`); return { ok: true, clicks, seen }; }
     if (did) { clicks++; idle = 0; if (clicks % 25 === 0) log(`${label}: ${clicks} clicks, last: ${did}`); await page.waitForTimeout(120); }

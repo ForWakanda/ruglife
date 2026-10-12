@@ -7,6 +7,8 @@ import { act, request, useNet, type NetState } from "./net.js";
 import { Card, ChogFace, imageUrl, ROLE_INFO, roleLabel } from "./cards.js";
 import { GlobalAlert } from "./alert.js";
 import type { NewsLine } from "./news.js";
+import { Track, Headline } from "./track.js";
+import { LiveCoach } from "./coach.js";
 import { fund, KIND, TRIGGER } from "./wallet.js";
 
 export const PHASE_LABEL: Record<View["phase"], string> = {
@@ -116,15 +118,17 @@ export function TablePane({ view, info, news, at, onAct, address, practice, coac
         <a href="#/" className="muted">← tables</a>
       </div>
 
+      <Track view={view} me={me} />
       <div className="seats">
         {view.seats.map((s) => <Seat key={s.seat} s={s} view={view} me={me} up={actors.includes(s.seat)} />)}
       </div>
 
       <div className="floor">
+        <Headline view={view} me={me} actors={actors} news={news} />
         {coach}
+        {!practice && !coach ? <LiveCoach view={view} me={me} actors={actors} /> : null}
         {view.fight ? <Fight view={view} me={me} /> : (
           <>
-            <div className="hint">{view.phase === "lobby" ? "Dealing the table" : view.phase === "over" ? "Game over" : view.turn?.seat === me?.seat ? (view.phase === "turn.start" ? "Your turn. Start trouble." : view.phase === "turn.airdrop" ? "Airdrop: too many cards" : "Free play") : `${nameOf(view, view.turn?.seat ?? 0)}'s turn`}</div>
             <div className="row" style={{ alignItems: "flex-start" }}>
               <div className="decks">
                 <div className="deck trouble"><span>TROUBLE</span><b>{view.decks.trouble}</b><span style={{ fontSize: 10 }}>{view.decks.troubleDiscard} out</span></div>
