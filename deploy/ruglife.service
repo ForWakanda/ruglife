@@ -8,7 +8,7 @@ Type=simple
 User=ec2-user
 WorkingDirectory=/srv/games/ruglife
 # the SIWE domain/uri must match the page the wallet is on; the escrow stays unset until the signer/funder decision (pots and bounties off)
-Environment=NODE_ENV=production PORT=8796 RUGLIFE_DOMAIN=ruglife.lootandbetrayal.com RUGLIFE_URI=https://ruglife.lootandbetrayal.com
+Environment=NODE_ENV=production PORT=8796 RUGLIFE_DOMAIN=ruglife.xyz RUGLIFE_URI=https://ruglife.xyz
 EnvironmentFile=-/etc/games/ruglife.env
 ExecStart=/usr/bin/node dist/server/index.mjs
 Restart=always
