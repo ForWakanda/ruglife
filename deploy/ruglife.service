@@ -1,0 +1,35 @@
+[Unit]
+Description=RUG LIFE (Chogathon 2026)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/srv/games/ruglife
+# the SIWE domain/uri must match the page the wallet is on; the escrow stays unset until the signer/funder decision (pots and bounties off)
+Environment=NODE_ENV=production PORT=8796 RUGLIFE_DOMAIN=ruglife.lootandbetrayal.com RUGLIFE_URI=https://ruglife.lootandbetrayal.com
+EnvironmentFile=-/etc/games/ruglife.env
+ExecStart=/usr/bin/node dist/server/index.mjs
+Restart=always
+RestartSec=3
+# the box is 412 MB: bound each game so one can never take the others down
+MemoryHigh=150M
+MemoryMax=250M
+# hardening: public-facing, so give it nothing it does not need
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/games/ruglife/data
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+LockPersonality=yes
+StandardOutput=append:/var/log/ruglife.log
+StandardError=append:/var/log/ruglife.log
+
+[Install]
+WantedBy=multi-user.target
