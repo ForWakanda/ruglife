@@ -41,6 +41,16 @@ export function startServer(opts: ServerOpts = {}) {
 
   const http = createServer((req, res) => serveStatic(req, res));
   const wss = new WebSocketServer({ server: http });
+  // ⚙ keepalive: ping every 25 s; a socket that missed the last pong is terminated so its session reads as disconnected
+  const alive = new Map<WebSocket, boolean>();
+  const keepalive = setInterval(() => {
+    for (const ws of sockets.keys()) {
+      if (alive.get(ws) === false) { ws.terminate(); continue; }
+      alive.set(ws, false);
+      try { ws.ping(); } catch { /* closing */ }
+    }
+  }, 25_000);
+  keepalive.unref?.();
   http.on("error", (e) => log(`http error ${String(e)}`));
   wss.on("error", (e) => log(`wss error ${String(e)}`));
 
@@ -87,8 +97,9 @@ export function startServer(opts: ServerOpts = {}) {
       c.session = s;
       send(ws, { type: "welcome", session: s.id, address: s.address });
       send(ws, tableList(s.id));
-      // re-attach to tables this session sits at
-      for (const t of tables.values()) if (t.seatOfSession(s.id) !== null && t.status !== "over") attach(ws, t);
+      // re-attach to tables this session sits at, and send each one's current view: a reconnecting client otherwise keeps the
+      // view from before the drop and its clicks are refused as illegal (seen on the user's table 2026-10-13)
+      for (const t of tables.values()) if (t.seatOfSession(s.id) !== null && t.status !== "over") { attach(ws, t); if (t.state) send(ws, t.viewMsg(s.id)); }
       return;
     }
     const s = c.session;
@@ -185,6 +196,7 @@ export function startServer(opts: ServerOpts = {}) {
         const t = tables.get(msg.table);
         if (!t) return err(ws, "table");
         try { t.act(msg.action, s.id); } catch (e) {
+          log(`act refused table ${t.id} session ${s.id.slice(0, 8)} ${msg.action.type} seat ${msg.action.seat} seq ${t.state?.seq ?? "-"}: ${(e as Error).message}`);
           if (e instanceof IllegalAction) return err(ws, "illegal", e.message);
           return err(ws, "act", (e as Error).message);
         }
@@ -203,6 +215,8 @@ export function startServer(opts: ServerOpts = {}) {
 
   wss.on("connection", (ws) => {
     sockets.set(ws, { session: null, watching: new Set() });
+    alive.set(ws, true);
+    ws.on("pong", () => alive.set(ws, true));
     ws.on("error", (e) => log(`ws error ${String(e)}`));
     ws.on("message", (data) => {
       let msg: ClientMsg;
@@ -211,6 +225,7 @@ export function startServer(opts: ServerOpts = {}) {
       handle(ws, msg).catch((e) => { log(`handle ${msg.type}: ${String(e)}`); err(ws, "server", String((e as Error).message ?? e)); });
     });
     ws.on("close", () => {
+      alive.delete(ws);
       const c = sockets.get(ws);
       sockets.delete(ws);
       if (!c?.session) return;
@@ -266,7 +281,7 @@ export function startServer(opts: ServerOpts = {}) {
   return {
     http, wss, tables, sessions,
     port: () => (http.address() as { port: number }).port,
-    close: async () => { if (poll) clearInterval(poll); for (const t of tables.values()) t.stop(); for (const ws of sockets.keys()) ws.terminate(); await new Promise<void>((r) => wss.close(() => r())); await new Promise<void>((r) => http.close(() => r())); },
+    close: async () => { if (poll) clearInterval(poll); clearInterval(keepalive); for (const t of tables.values()) t.stop(); for (const ws of sockets.keys()) ws.terminate(); await new Promise<void>((r) => wss.close(() => r())); await new Promise<void>((r) => http.close(() => r())); },
   };
 }
 

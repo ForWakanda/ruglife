@@ -1,5 +1,5 @@
 // Card and Chog rendering. The picture on every card is a real Chog from the collection (CardView.cast).
-import type { CardView, ChogRef, Role, RoleOrLegend } from "@ruglife/protocol";
+import type { CardView, ChogRef, Role, RoleOrLegend, SeatView } from "@ruglife/protocol";
 import { ART } from "./art.js";
 
 const GATEWAY = "https://chog-genesis.mypinata.cloud/ipfs/bafybeihau2egcccbdxymeckmmbrqytbfor5gkt3en6d5fsbueymdbq7g6e";
@@ -17,6 +17,14 @@ export const ROLE_INFO: Record<RoleOrLegend, { label: string; perk: string }> = 
   legend: { label: "Legend", perk: "A 1/1: picks any role at sit-down, fixed for the game." },
 };
 export const roleLabel = (r: RoleOrLegend | Role | null | undefined): string => (r ? ROLE_INFO[r].label : "—");
+
+/** A seat's standing power outside a fight: level + kit (+3 unless switched off) + equipped gear. Mirrors the engine's base; cards and perks are added in a fight. */
+export const powerParts = (s: SeatView): { level: number; kit: number; gear: number; total: number } => {
+  const kit = s.kitOn ? 3 : 0;
+  const gear = s.gear.reduce((a, g) => a + (g.def.bonus ?? 0), 0);
+  return { level: s.level, kit, gear, total: s.level + kit + gear };
+};
+export const powerTitle = (s: SeatView): string => { const p = powerParts(s); return `power ${p.total} = level ${p.level} + kit ${p.kit}${s.kitOn ? "" : " (off)"} + gear ${p.gear}`; };
 
 export function ChogFace({ chog, size = 40 }: { chog: ChogRef; size?: number }) {
   return (
@@ -40,7 +48,7 @@ export function Card({ card, small, onClick, selected, badge, cancelled, classNa
         {!small && d.flavour ? <div className="flav">{d.flavour}</div> : null}
         <div className="text">{d.text}</div>
       </div>
-      {!ART.has(d.id) && card.cast.file > 0 ? <div className="cast">starring {card.cast.name}</div> : null}
+      {card.cast.file > 0 ? <div className="cast"><img src={imageUrl(card.cast.file)} alt="" loading="lazy" />starring {card.cast.name}</div> : null}
       {badge ? <span className="stamp badge">{badge}</span> : null}
     </div>
   );

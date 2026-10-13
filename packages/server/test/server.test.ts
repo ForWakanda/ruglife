@@ -132,6 +132,22 @@ describe("server", () => {
     expect((await e.wait("error")).code).toBe("live");
   });
 
+  it("a reconnecting session gets the current view of its live table without asking (a stale view made the user's clicks illegal, 2026-10-13)", async () => {
+    const a = await connect();
+    a.send({ type: "create", mode: "standard", timers: false });
+    const id = (await a.wait("table")).table.id;
+    a.send({ type: "sit", table: id, loaner: true }); await a.wait("table", (m) => m.table.seats.length === 1);
+    a.send({ type: "addBot", table: id }); await a.wait("table", (m) => m.table.seats.length === 2);
+    a.send({ type: "start", table: id });
+    const first = await a.wait("view", (m) => m.table === id);
+    // the same session on a fresh socket: hello alone brings the table's current view, as the seat (not the stands)
+    const b = new Client(); await b.open(srv.port()); clients.push(b); await b.hello(a.session);
+    const again = await b.wait("view", (m) => m.table === id, 3_000);
+    expect(again.view.viewer).toBe(first.view.viewer);
+    expect(again.view.seq).toBeGreaterThanOrEqual(first.view.seq);
+    expect(again.events).toEqual([]);
+  });
+
   it("a guest without sign-in cannot sit with a Chog", async () => {
     const g = await connect();
     g.send({ type: "create", mode: "standard", timers: false });

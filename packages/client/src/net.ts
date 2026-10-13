@@ -13,6 +13,8 @@ export interface NetState {
   news: Record<string, NewsLine[]>;
   viewAt: Record<string, number>; // when the latest view of a table arrived (for the client's clock)
   errors: NetError[];
+  /** An action sent and not yet answered by a view: the buttons show it. Cleared by the next view or the resync. */
+  pending: { table: string; type: string; at: number } | null;
 }
 
 const SESSION_KEY = "ruglife.session";
@@ -22,7 +24,10 @@ const here = typeof location !== "undefined" ? location : { port: "", origin: "h
 export const SERVER_HTTP: string = env.VITE_SERVER ?? (here.port === "5173" ? `http://${DEV_SERVER}` : here.origin);
 const SERVER_WS = SERVER_HTTP.replace(/^http/, "ws");
 
-let state: NetState = { status: "connecting", session: null, address: null, tables: [], views: {}, news: {}, viewAt: {}, errors: [] };
+let state: NetState = { status: "connecting", session: null, address: null, tables: [], views: {}, news: {}, viewAt: {}, errors: [], pending: null };
+/** ⚙ An act with no view back inside this window re-reads the table (a lost click, a stale view after a reconnect). */
+const ACT_RESYNC_MS = 3_000;
+let pendingTimer: number | null = null;
 const listeners = new Set<() => void>();
 function set(patch: Partial<NetState>): void {
   state = { ...state, ...patch };
@@ -78,7 +83,15 @@ export function request<T extends ServerMsg["type"]>(msg: ClientMsg, type: T, ti
   });
 }
 export function act(table: string, action: Action): void {
+  if (state.pending && state.pending.table === table && Date.now() - state.pending.at < ACT_RESYNC_MS) return; // one click at a time: the first is in flight
+  set({ pending: { table, type: action.type, at: Date.now() } });
+  if (pendingTimer) clearTimeout(pendingTimer);
+  pendingTimer = window.setTimeout(() => { pendingTimer = null; if (state.pending?.table === table) { set({ pending: null }); resync(table); } }, ACT_RESYNC_MS);
   send({ type: "act", table, action, clientSeq: ++clientSeq });
+}
+/** Asks the server for the table again: the current view comes back for this socket. */
+export function resync(table: string): void {
+  if (ws && ws.readyState === WebSocket.OPEN) send({ type: "watch", table });
 }
 function pushError(code: string, detail?: string): void {
   const e: NetError = { id: ++errId, code, at: Date.now(), ...(detail ? { detail } : {}) };
@@ -92,7 +105,9 @@ function onMessage(msg: ServerMsg): void {
   switch (msg.type) {
     case "welcome":
       try { localStorage.setItem(SESSION_KEY, msg.session); } catch { /* ignore */ }
-      set({ session: msg.session, address: msg.address });
+      set({ session: msg.session, address: msg.address, pending: null });
+      // a reconnect: every table on screen is re-read so no click lands on a view from before the drop
+      for (const id of Object.keys(state.views)) resync(id);
       break;
     case "signedIn": set({ address: msg.address }); break;
     case "tables": set({ tables: msg.tables }); break;
@@ -104,10 +119,14 @@ function onMessage(msg: ServerMsg): void {
     case "view": {
       const prev = state.news[msg.table] ?? [];
       const lines = msg.events.length ? [...prev, ...newsLines(msg.view, msg.events as SeqEvent[])].slice(-120) : prev;
-      set({ views: { ...state.views, [msg.table]: msg.view }, news: { ...state.news, [msg.table]: lines }, viewAt: { ...state.viewAt, [msg.table]: Date.now() } });
+      const pending = state.pending?.table === msg.table ? null : state.pending;
+      if (pending === null && pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+      set({ views: { ...state.views, [msg.table]: msg.view }, news: { ...state.news, [msg.table]: lines }, viewAt: { ...state.viewAt, [msg.table]: Date.now() }, pending });
       break;
     }
-    case "error": pushError(msg.code, msg.detail); break;
+    case "error":
+      if ((msg.code === "illegal" || msg.code === "act") && state.pending) { const t = state.pending.table; set({ pending: null }); if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; } resync(t); pushError("refused", `${msg.detail ?? msg.code} — the table was re-read; look again`); break; }
+      pushError(msg.code, msg.detail); break;
     default: break;
   }
 }

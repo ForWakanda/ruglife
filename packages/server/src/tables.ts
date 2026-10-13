@@ -1,6 +1,6 @@
 // A table: an open lobby, then an engine game driven by humans, bots and deadlines.
 import { randomBytes } from "node:crypto";
-import type { Action, GameConfig, SeatId, SeatKind, SeqEvent, TableInfo, View } from "@ruglife/protocol";
+import type { Action, GameConfig, SeatId, SeatKind, SeqEvent, TableInfo, View, ServerMsg } from "@ruglife/protocol";
 import { apply, botAction, createGame, DEFAULT_CARD_SET, IllegalAction, legalActions, viewFor, type GameState, token } from "@ruglife/engine";
 import { tokens } from "@ruglife/cards";
 import type { Store } from "./store.js";
@@ -246,6 +246,10 @@ export class Table {
     return this.deadlineSeat === null ? null : { seat: this.deadlineSeat, at: Date.now() };
   }
 
+  /** The current view for one session (a reconnecting socket, a fresh watcher). */
+  viewMsg(session: string): ServerMsg {
+    return { type: "view", table: this.id, view: viewFor(this.state!, this.seatOfSession(session) ?? "stands"), events: [] };
+  }
   broadcast(events: SeqEvent[]): void {
     if (!this.state) return;
     for (const w of this.watchers.values()) {

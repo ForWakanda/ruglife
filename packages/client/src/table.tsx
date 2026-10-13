@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Action, CardView, SeatId, SeatView, TableInfo, View } from "@ruglife/protocol";
 import { formatUnits, parseUnits } from "viem";
 import { act, request, useNet, type NetState } from "./net.js";
-import { Card, ChogFace, imageUrl, ROLE_INFO, roleLabel } from "./cards.js";
+import { Card, ChogFace, imageUrl, powerParts, powerTitle, ROLE_INFO, roleLabel } from "./cards.js";
 import { GlobalAlert } from "./alert.js";
 import type { NewsLine } from "./news.js";
 import { Track, Headline } from "./track.js";
@@ -15,7 +15,7 @@ export const PHASE_LABEL: Record<View["phase"], string> = {
   lobby: "Dealing", "turn.start": "Start trouble", "fight.setup": "Fight: set-up", "fight.pileOn": "Fight: pile-on", "fight.rug": "Sealed Rug choices", "fight.jeet": "Jeet",
   "turn.free": "Free play", "turn.airdrop": "Airdrop", over: "GLOBAL ALERT",
 };
-const DEADLINE_MS: Record<string, number> = { lobby: 120_000, prompt: 30_000, "fight.pileOn": 20_000, turn: 60_000 }; // mirrors the server's ⚙ defaults
+const DEADLINE_MS: Record<string, number> = { lobby: 120_000, prompt: 30_000, "fight.pileOn": 30_000, turn: 60_000 }; // mirrors the server's ⚙ DEADLINES (priority 30 s since 2026-10-12)
 
 export function TableScreen({ id }: { id: string }) {
   const net = useNet();
@@ -26,7 +26,7 @@ export function TableScreen({ id }: { id: string }) {
   }, [id, net.status, !!view]);
   if (!info && !view) return <div className="panel">Looking for table {id}…</div>;
   if (!view) return <PreGame info={info!} net={net} />;
-  return <TablePane view={view} info={info ?? null} news={net.news[id] ?? []} at={net.viewAt[id] ?? Date.now()} onAct={(a) => act(id, a)} address={net.address} />;
+  return <TablePane view={view} info={info ?? null} news={net.news[id] ?? []} at={net.viewAt[id] ?? Date.now()} onAct={(a) => act(id, a)} address={net.address} pending={net.pending?.table === id ? net.pending.type : null} />;
 }
 
 function PreGame({ info, net }: { info: TableInfo; net: NetState }) {
@@ -64,9 +64,9 @@ function sitHere(table: string, loaner: boolean): void {
 /** TableInfo seats carry the metadata name "CHOG #<file>"; the file is the marketplace number. */
 const fileFromName = (name: string): number => Number(/#(\d+)/.exec(name)?.[1] ?? 1);
 
-export interface PaneProps { view: View; info: TableInfo | null; news: NewsLine[]; at: number; onAct: (a: Action) => void; address: `0x${string}` | null; practice?: boolean; coach?: React.ReactNode }
+export interface PaneProps { view: View; info: TableInfo | null; news: NewsLine[]; at: number; onAct: (a: Action) => void; address: `0x${string}` | null; practice?: boolean; coach?: React.ReactNode; /** the action type in flight (sent, no view back yet) */ pending?: string | null }
 
-export function TablePane({ view, info, news, at, onAct, address, practice, coach }: PaneProps) {
+export function TablePane({ view, info, news, at, onAct, address, practice, coach, pending }: PaneProps) {
   const me = view.viewer === "stands" ? null : view.seats.find((s) => s.seat === view.viewer) ?? null;
   const legal = view.legal;
   const [chooser, setChooser] = useState<{ title: string; options: Array<{ label: string; action: Action }> } | null>(null);
@@ -148,21 +148,25 @@ export function TablePane({ view, info, news, at, onAct, address, practice, coac
         </div>
       </div>
 
+      {me ? (
+        <div className="actionbar">
+          {of("START_GAME").length ? <Act t="START_GAME" cls="big green" pending={pending} onClick={() => do_(of("START_GAME")[0]!)}>Deal</Act> : null}
+          {of("START_TROUBLE").length ? <Act t="START_TROUBLE" cls="big red" pending={pending} onClick={() => do_(of("START_TROUBLE")[0]!)}>Start trouble</Act> : null}
+          {asks.length ? <Act t="ASK_HELP" cls="big purple" pending={pending} onClick={() => setChooser({ title: "Ask for help (offer a cut of the bags)", options: asks.map((a) => ({ label: `${nameOf(view, a.to)} · ${roleLabel(view.seats.find((s) => s.seat === a.to)?.playRole)} · ${a.cut} bag${a.cut === 1 ? "" : "s"}`, action: a })) })}>Ask for help</Act> : null}
+          {of("PASS").length ? <Act t="PASS" cls={fighterIsMe && view.phase === "fight.setup" ? "big red" : "big"} pending={pending} onClick={() => do_(of("PASS")[0]!)}>{fighterIsMe && view.phase === "fight.setup" ? "Fight!" : "Pass"}</Act> : null}
+          {of("LEAVE_FIGHT").length ? <Act t="LEAVE_FIGHT" cls="ghost" pending={pending} onClick={() => do_(of("LEAVE_FIGHT")[0]!)}>Walk out of the fight</Act> : null}
+          {of("GRAB_BAG").length ? <Act t="GRAB_BAG" cls="" pending={pending} onClick={() => do_(of("GRAB_BAG")[0]!)}>Grab a bag</Act> : null}
+          {sellable ? <Act t="SELL" cls="" pending={pending} onClick={() => setSell(true)}>Sell gear for a level</Act> : null}
+          {trades.length ? <Act t="TRADE_OFFER" cls="ghost" pending={pending} onClick={() => setTrade(true)}>Trade gear</Act> : null}
+          {of("END_TURN").length ? <Act t="END_TURN" cls="big" pending={pending} onClick={() => do_(of("END_TURN")[0]!)}>End turn</Act> : null}
+          {!legal.length && view.phase !== "over" ? <span className="muted">{pending ? "Sending…" : actors.length ? `Waiting for ${actors.map((s) => nameOf(view, s)).join(", ")}. Nothing to do until it is your priority.` : "Nothing to do until it is your priority."}</span> : null}
+          {legal.length && pending ? <span className="muted">sending…</span> : null}
+        </div>
+      ) : null}
       <div className="hand">
         {me ? (
           <>
-            <div className="actions">
-              {of("START_GAME").length ? <button className="btn big green" onClick={() => do_(of("START_GAME")[0]!)}>Deal</button> : null}
-              {of("START_TROUBLE").length ? <button className="btn big red" onClick={() => do_(of("START_TROUBLE")[0]!)}>Start trouble</button> : null}
-              {of("GRAB_BAG").length ? <button className="btn" onClick={() => do_(of("GRAB_BAG")[0]!)}>Grab a bag</button> : null}
-              {asks.length ? <button className="btn purple" onClick={() => setChooser({ title: "Ask for help (offer a cut of the bags)", options: asks.map((a) => ({ label: `${nameOf(view, a.to)} · ${roleLabel(view.seats.find((s) => s.seat === a.to)?.playRole)} · ${a.cut} bag${a.cut === 1 ? "" : "s"}`, action: a })) })}>Ask for help</button> : null}
-              {of("PASS").length ? <button className={`btn ${fighterIsMe && view.phase === "fight.setup" ? "big red" : ""}`} onClick={() => do_(of("PASS")[0]!)}>{fighterIsMe && view.phase === "fight.setup" ? "Fight!" : "Pass"}</button> : null}
-              {of("LEAVE_FIGHT").length ? <button className="btn ghost" onClick={() => do_(of("LEAVE_FIGHT")[0]!)}>Walk out of the fight</button> : null}
-              {sellable ? <button className="btn" onClick={() => setSell(true)}>Sell gear for a level</button> : null}
-              {trades.length ? <button className="btn ghost" onClick={() => setTrade(true)}>Trade gear</button> : null}
-              {of("END_TURN").length ? <button className="btn big" onClick={() => do_(of("END_TURN")[0]!)}>End turn</button> : null}
-              {!legal.length && view.phase !== "over" ? <span className="muted">Nothing to do until it is your priority.</span> : null}
-            </div>
+            <div className="row" style={{ marginBottom: 6, justifyContent: "space-between" }}><span className="lower3" title={powerTitle(me)}>YOUR HAND · POWER {powerParts(me).total} = level {me.level} + kit {powerParts(me).kit} + gear {powerParts(me).gear}</span><span className="muted" style={{ fontSize: 12 }}>glowing cards can be played now · six is the hand limit</span></div>
             <div className="handrow">
               {(me.hand ?? []).map((c) => { const n = cardOptions(c).length; return <Card key={c.inst} card={c} onClick={n ? () => onCard(c) : undefined} className={n ? "" : "dim"} badge={n ? undefined : undefined} />; })}
               {me.hand?.length === 0 ? <span className="muted">Empty hand.</span> : null}
@@ -179,6 +183,12 @@ export function TablePane({ view, info, news, at, onAct, address, practice, coac
       {view.phase === "over" && !alertSeen ? <GlobalAlert view={view} onClose={() => setAlertSeen(true)} practice={practice ?? false} /> : null}
     </div>
   );
+}
+
+/** An action button: disabled while any action is in flight; the one that was clicked reads 'sending…'. */
+function Act({ t, cls, pending, onClick, children }: { t: string; cls: string; pending: string | null | undefined; onClick: () => void; children: React.ReactNode }) {
+  const mine = pending === t;
+  return <button className={`btn ${cls} ${mine ? "sending" : ""}`} disabled={!!pending} onClick={onClick}>{mine ? "sending…" : children}</button>;
 }
 
 export const nameOf = (view: View, seat: SeatId): string => view.seats.find((s) => s.seat === seat)?.chog.name ?? `seat ${seat}`;
@@ -220,9 +230,12 @@ function Seat({ s, view, me, up }: { s: SeatView; view: View; me: SeatView | nul
           </div>
         </div>
       </div>
-      <div className="lvl">{s.level}<small>level</small></div>
+      <div className="stats">
+        <div className="stat2 level" title="first to level 10 controls the world"><b>{s.level}</b><small>LEVEL</small></div>
+        <div className={`stat2 power ${s.kitOn ? "" : "off"}`} title={powerTitle(s)}><b>{powerParts(s).total}</b><small>POWER</small></div>
+      </div>
       <div className="chips">
-        <span className={`chip kit ${s.kitOn ? "" : "off"}`} title="the kit: +3 power, always, unless switched off">kit +3</span>
+        {!s.kitOn ? <span className="chip kit off" title="the kit (+3) is switched off until this seat's next turn starts">kit OFF</span> : null}
         {s.gear.map((g) => <span className="chip" key={g.inst} title={g.def.text}>{g.def.name} +{g.def.bonus}</span>)}
         <span className="chip">{s.handCount} in hand</span>
         <span className={`rug ${s.rug}`}>{s.rug === "held" ? "RUG HELD" : "RUG PULLED"}</span>
@@ -234,15 +247,28 @@ function Seat({ s, view, me, up }: { s: SeatView; view: View; me: SeatView | nul
 
 function Fight({ view, me }: { view: View; me: SeatView | null }) {
   const f = view.fight!;
-  const win = f.power.fighter > f.power.threat || (f.power.fighter === f.power.threat && sideHasMuscle(view));
+  const muscle = sideHasMuscle(view);
+  const win = f.power.fighter > f.power.threat || (f.power.fighter === f.power.threat && muscle);
   const threat = f.threat.def;
+  const side = [f.fighter, ...f.helpers.map((h) => h.seat)].map((s) => view.seats.find((x) => x.seat === s)!);
+  const bodies = side.reduce((a, s) => a + powerParts(s).total, 0);
+  const sideCards = f.plays.filter((p) => p.side === "fighter" && !p.cancelled).reduce((a, p) => a + p.mod, 0);
+  const sideOther = f.power.fighter - bodies - sideCards; // perks, the Degen die
+  const lock = threat.lock?.length && !f.power.lockOpen ? f.power.lockPenalty : 0;
+  const threatCards = f.plays.filter((p) => p.side === "threat" && !p.cancelled).reduce((a, p) => a + p.mod, 0);
+  const threatOther = f.power.threat - (threat.level ?? 0) - lock - threatCards;
+  const diff = f.power.fighter - f.power.threat;
+  const mineSide = me !== null && side.some((s) => s.seat === me.seat);
+  const verdict = diff > 0 ? `${mineSide ? "YOU ARE" : nameOf(view, f.fighter).toUpperCase() + " IS"} WINNING BY ${diff}` : diff === 0 ? (muscle ? "TIED — THE MUSCLE WINS IT" : "TIED — A TIE LOSES") : `${mineSide ? "YOU ARE" : nameOf(view, f.fighter).toUpperCase() + " IS"} LOSING BY ${-diff}`;
+  const sgn = (n: number): string => (n >= 0 ? `+${n}` : `${n}`);
   return (
     <div className="col">
-      <div className="row"><span className="live">LIVE</span><span className="lower3">{nameOf(view, f.fighter)}{f.helpers.length ? ` + ${f.helpers.map((h) => nameOf(view, h.seat)).join(" + ")}` : ""} vs {threat.name}</span>{f.pendingAsk ? <span className="chip">asking {nameOf(view, f.pendingAsk.to)} for {f.pendingAsk.cut} bags…</span> : null}{f.rugPending.length ? <span className="chip" style={{ background: "var(--red)" }}>sealed choices: {f.rugPending.map((s) => nameOf(view, s)).join(", ")}</span> : null}</div>
+      <div className="row"><span className="live">LIVE</span><span className="lower3">{nameOf(view, f.fighter)}{f.helpers.length ? ` + ${f.helpers.map((h) => nameOf(view, h.seat)).join(" + ")}` : ""} vs {threat.name}</span><span className={`verdict ${win ? "win" : "lose"}`}>{verdict}</span>{f.pendingAsk ? <span className="chip">asking {nameOf(view, f.pendingAsk.to)} for {f.pendingAsk.cut} bags…</span> : null}{f.rugPending.length ? <span className="chip" style={{ background: "var(--red)" }}>sealed choices: {f.rugPending.map((s) => nameOf(view, s)).join(", ")}</span> : null}</div>
       <div className="fight">
         <div className="side-box">
           <div className={`power ${win ? "win" : "lose"}`}>{f.power.fighter}</div>
           <div>{nameOf(view, f.fighter)}'s side {f.helpers.length ? `(${f.helpers.length} helper${f.helpers.length === 1 ? "" : "s"})` : "(alone)"}</div>
+          <div className="math">{side.map((s) => <span key={s.seat} title={powerTitle(s)}>{s.chog.name} <b>{powerParts(s).total}</b> · </span>)}cards <b>{sgn(sideCards)}</b>{sideOther ? <> · perks/dice <b>{sgn(sideOther)}</b></> : null} = <b>{f.power.fighter}</b></div>
           {threat.lock?.length ? <div className={`lock ${f.power.lockOpen ? "" : "closed"}`}>{f.power.lockOpen ? `Lock open: ${threat.lock.map(roleLabel).join(" + ")} on side` : `LOCKED: needs ${threat.lock.map(roleLabel).join(" + ")} (+${f.power.lockPenalty} to the threat)`}</div> : null}
           {f.plays.filter((p) => p.side === "fighter").length ? <div className="plays">{f.plays.filter((p) => p.side === "fighter").map((p, i) => <span className={`chip ${p.cancelled ? "off" : ""}`} key={i}>{p.card.def.name} {p.mod >= 0 ? "+" : ""}{p.mod} ({nameOf(view, p.by)})</span>)}</div> : null}
         </div>
@@ -252,6 +278,7 @@ function Fight({ view, me }: { view: View; me: SeatView | null }) {
           <div>
             <div className={`power ${win ? "lose" : "win"}`}>{f.power.threat}</div>
             <div>Threat level {threat.level}{(threat.levelsWon ?? 1) > 1 ? ` · BOSS (${threat.levelsWon} levels)` : ""} · {threat.bags} bag{threat.bags === 1 ? "" : "s"}</div>
+            <div className="math">level <b>{threat.level ?? 0}</b>{lock ? <> · LOCKED <b>+{lock}</b></> : null} · cards <b>{sgn(threatCards)}</b>{threatOther ? <> · other <b>{sgn(threatOther)}</b></> : null} = <b>{f.power.threat}</b></div>
             {f.plays.filter((p) => p.side === "threat").length ? <div className="plays">{f.plays.filter((p) => p.side === "threat").map((p, i) => <span className={`chip ${p.cancelled ? "off" : ""}`} key={i}>{p.card.def.name} {p.mod >= 0 ? "+" : ""}{p.mod} ({nameOf(view, p.by)})</span>)}</div> : null}
           </div>
         </div>
@@ -292,7 +319,7 @@ function Prompt({ view, me, onDone }: { view: View; me: SeatView; onDone: (a: Ac
     return (
       <div className="overlay"><div className="modal">
         <h2>{nameOf(view, f.fighter)} asks for your help</h2>
-        <div className="row" style={{ alignItems: "flex-start" }}><Card card={f.threat} small /><div>Against <b>{f.threat.def.name}</b> (power {f.power.threat}; their side {f.power.fighter} now, +{me.level + (me.kitOn ? 3 : 0) + me.gear.reduce((a, g) => a + (g.def.bonus ?? 0), 0)} with you). Your cut: <b>{ask.cut} of {f.threat.def.bags} bags</b>. Levels go to the fighter. If the fight is lost you roll to jeet too. If it is won, anyone still holding a Rug may pull it.</div></div>
+        <div className="row" style={{ alignItems: "flex-start" }}><Card card={f.threat} small /><div>Against <b>{f.threat.def.name}</b> (power {f.power.threat}; their side {f.power.fighter} now, <b>{f.power.fighter + powerParts(me).total}</b> with your {powerParts(me).total}). Your cut: <b>{ask.cut} of {f.threat.def.bags} bags</b>. Levels go to the fighter. If the fight is lost you roll to jeet too. If it is won, anyone still holding a Rug may pull it.</div></div>
         <div className="choices"><button className="btn big green" onClick={() => onDone({ type: "ANSWER_HELP", seat: me.seat, accept: true })}>I'm in for {ask.cut}</button><button className="btn big ghost" onClick={() => onDone({ type: "ANSWER_HELP", seat: me.seat, accept: false })}>Not my fight</button></div>
       </div></div>
     );
@@ -309,7 +336,7 @@ function Prompt({ view, me, onDone }: { view: View; me: SeatView; onDone: (a: Ac
       <div className="overlay"><div className="modal">
         <h2>Airdrop: keep 6</h2>
         <div>You hold {hand.length}. Pick the 6 to keep; the rest drop to the lowest-level player (a Sob Story first; you discard if that is you).</div>
-        <div className="handrow" style={{ marginTop: 8 }}>{hand.map((c) => <Card key={c.inst} card={c} small selected={keep.includes(c.inst)} onClick={() => toggle(c.inst)} />)}</div>
+        <div className="handrow" style={{ marginTop: 8 }}>{hand.map((c) => <Card key={c.inst} card={c} small selected={keep.includes(c.inst)} className={keep.includes(c.inst) ? "" : "dim"} badge={keep.includes(c.inst) ? "KEEP" : undefined} onClick={() => toggle(c.inst)} />)}</div>
         <div className="choices"><button className="btn big" disabled={keep.length !== Math.min(6, hand.length)} onClick={() => onDone({ type: "AIRDROP_KEEP", seat: me.seat, cards: keep })}>Keep these {keep.length}</button></div>
       </div></div>
     );
@@ -325,14 +352,15 @@ function Prompt({ view, me, onDone }: { view: View; me: SeatView; onDone: (a: Ac
 
 function SellModal({ me, legal, onDone, onClose }: { me: SeatView; legal: Extract<Action, { type: "SELL" }>; onDone: (a: Action) => void; onClose: () => void }) {
   const all = [...(me.hand ?? []), ...me.gear].filter((c) => legal.cards.includes(c.inst));
-  const [sel, setSel] = useState<string[]>(all.map((c) => c.inst));
+  const [sel, setSel] = useState<string[]>([]); // nothing picked until you pick it (2026-10-13: everything pre-picked read as 'already selling')
   const total = all.filter((c) => sel.includes(c.inst)).reduce((a, c) => a + (c.def.value ?? 0), 0);
+  const levels = Math.floor(total / 1000);
   return (
     <div className="overlay" onClick={onClose}><div className="modal" onClick={(e) => e.stopPropagation()}>
-      <h2>Sell gear: 1,000 notes = a level</h2>
-      <div className="muted">Notes are play money printed on gear. They never touch $CHOG. The 10th level cannot be bought.</div>
-      <div className="handrow" style={{ marginTop: 8 }}>{all.map((c) => <Card key={c.inst} card={c} small selected={sel.includes(c.inst)} onClick={() => setSel((s) => (s.includes(c.inst) ? s.filter((x) => x !== c.inst) : [...s, c.inst]))} />)}</div>
-      <div className="choices"><span className="lower3">{total} notes</span><button className="btn big" disabled={total < 1000} onClick={() => onDone({ type: "SELL", seat: me.seat, cards: sel })}>Sell for a level</button><button className="btn ghost" onClick={onClose}>Never mind</button></div>
+      <h2>Sell gear for a level</h2>
+      <div>Click the gear you want to sell. Every <b>1,000 notes</b> sold is <b>one level</b>. The notes are the price printed on each card; they never touch $CHOG. The 10th level cannot be bought.</div>
+      <div className="handrow" style={{ marginTop: 8 }}>{all.map((c) => { const on = sel.includes(c.inst); return <Card key={c.inst} card={c} small selected={on} className={on ? "" : "dim"} badge={on ? `SELLING ${c.def.value ?? 0}` : undefined} onClick={() => setSel((s) => (s.includes(c.inst) ? s.filter((x) => x !== c.inst) : [...s, c.inst]))} />; })}</div>
+      <div className="choices" style={{ alignItems: "center" }}><span className="lower3">{total.toLocaleString()} of 1,000 notes{levels > 1 ? ` (${levels} levels)` : ""}</span><button className="btn big green" disabled={total < 1000} onClick={() => onDone({ type: "SELL", seat: me.seat, cards: sel })}>{total < 1000 ? `Pick ${(1000 - total).toLocaleString()} more notes` : levels > 1 ? `Sell for ${levels} levels` : "Sell for a level"}</button><button className="btn ghost" onClick={onClose}>Never mind</button></div>
     </div></div>
   );
 }
@@ -346,7 +374,7 @@ function TradeModal({ view, me, offers, onDone, onClose }: { view: View; me: Sea
     <div className="overlay" onClick={onClose}><div className="modal" onClick={(e) => e.stopPropagation()}>
       <h2>Trade gear</h2>
       <div className="muted">Pick what you give; then whose gear you want. They must accept.</div>
-      <div className="handrow" style={{ marginTop: 8 }}>{mine.map((c) => <Card key={c.inst} card={c} small selected={give === c.inst} onClick={() => setGive(c.inst)} />)}</div>
+      <div className="handrow" style={{ marginTop: 8 }}>{mine.map((c) => <Card key={c.inst} card={c} small selected={give === c.inst} className={give && give !== c.inst ? "dim" : ""} badge={give === c.inst ? "GIVING" : undefined} onClick={() => setGive(c.inst)} />)}</div>
       {give ? <div className="choices">{takes.map((o, i) => <button className="btn" key={i} onClick={() => onDone(o)}>{nameOf(view, o.to)}: {nameFor(o.to, o.take)}</button>)}</div> : null}
       <div className="choices"><button className="btn ghost" onClick={onClose}>Never mind</button></div>
     </div></div>

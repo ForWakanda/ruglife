@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Run with ~/ComfyUI/.venv/bin/python (it has PIL): the system python3 does not.
-"""Card art for every card that is NOT a Threat (Threats star a real Chog; everything else gets its own picture).
+"""Card art for every card. Threats get a monster of their own (2026-10-13: a Chog on every Threat read as lame too) and keep their
+real-Chog casting as the "starring" line with a small face; everything else gets its own picture.
 
     ~/ComfyUI/.venv/bin/python scripts/card-art.py   # renders the missing ones, writes packages/client/public/art/<id>.webp + src/art.ts
     python3 scripts/card-art.py --only s11 --seed 7   # redo one card with another seed
@@ -30,6 +31,8 @@ PALETTE = {
     "loot-oneshot": "Palette: electric blue, cyan and yellow with black.",
     "levelup": "Palette: gold, yellow and cream with black.",
     "key": "Palette: steel grey, yellow and black.",
+    "threat": "Palette: alarm red, acid yellow and black, menacing.",
+    "boss": "Palette: deep crimson, black and gold, towering and menacing.",
 }
 # id → (type, subject). Subjects are objects and scenes only: no people (the Chogs are the people of this game).
 SUBJECTS = {
@@ -107,6 +110,40 @@ SUBJECTS = {
  "k03": ("key", "A green sun visor with a sticky note stuck to it and a key card tucked in the band, on an admin desk."),
  "k04": ("key", "A banana shaped like a key turning in the lock of a vault's back door, a rotating security light."),
  "k05": ("key", "A scroll scribbled in crayon with a wax seal of a banana, a battering ram leaning on a door."),
+ # Threats are monsters, machines and creatures — never a human face (the Chogs are the people of this game); the cast Chog is the
+ # "starring" credit on the card, not the picture.
+ "t01": ("threat", "A small green goblin creature in a gas-station attendant vest holding a fuel nozzle that drips coins, a price sign with no writing, a snack rack behind it."),
+ "t02": ("threat", "A tiny panicking slime creature in a loose necktie slamming a huge red SELL-style lever on a trading desk, three monitors showing one falling red candle each, papers flying."),
+ "t03": ("threat", "A fat toad monster in a landlord's crown and bathrobe sitting on a throne made of a chat-server window, holding out a palm for rent, a tiny eviction scroll."),
+ "t04": ("threat", "A scarecrow stuffed with hundreds of empty crypto wallets and seed-phrase cards, crows made of parachutes, a field of tiny identical wallet-shaped tombstones."),
+ "t05": ("threat", "A friendly-looking robot headset creature with a wide fake smile, one claw holding a clipboard, the other claw reaching for a seed-phrase card, a support desk."),
+ "t06": ("threat", "A gang of three identical masked rat creatures in hoodies each carrying a copy-paste clipboard, strung together with bugs crawling over the code sheets."),
+ "t07": ("threat", "A sleek shark creature in a motivational coach's whistle and headset standing on a stage, an escalator of smaller fish walking into its mouth, a sign with no writing."),
+ "t08": ("threat", "A huge round monster with a vacuum-cleaner mouth hoovering up tiny picture frames off a gallery floor, price tags fluttering, the floor tiles peeling away."),
+ "t09": ("threat", "A sweaty bull creature strapped to a rocket chair labelled only with a huge x symbol, a lit fuse, a liquidation guillotine blade above, a fart cloud."),
+ "t10": ("threat", "A honey-dripping Venus flytrap monster wearing a headset and a name badge with no writing, a queue ticket machine, a phone with the cord cut."),
+ "t11": ("threat", "A parade of tiny panicking lemming creatures in single file carrying exit signs with no writing, marching off a cliff edge of a red candlestick chart, confetti."),
+ "t12": ("threat", "A headless business suit with a halo and angel wings holding a stopwatch set three seconds early, a pile of coins behind its back, a laboratory flask."),
+ "t13": ("threat", "A hydra monster with five heads each wearing a different startup logo-shaped hat, bursting out of a wall of pitch decks, suitcases of cash leaking from its tail."),
+ "t14": ("threat", "A bank counter booth with a shuttered steel window, a closed sign shape with no writing, a tentacle monster behind the window holding a sack of coins, cobwebs."),
+ "t15": ("threat", "A battalion of one hundred identical cardboard-cutout bot soldiers with megaphone heads, all plugged into one single charging cable, a parade ground."),
+ "t16": ("threat", "A giant glowing power switch set to off, a decentralised network of nodes drawn as little planets hanging dead and dark, a mechanical hand on the switch."),
+ "t17": ("threat", "A green goblin creature with a keyboard for teeth and a mouse-cursor arrow on a stick, hundreds of tiny speech bubbles around it, a suspicious link chain in its hand."),
+ "t18": ("threat", "A boxy rusty robot crying oil tears over a failed captcha puzzle of traffic lights and crosswalks, a tissue box, a heart-shaped battery."),
+ "t19": ("threat", "A giant monster sandwich with two slices of bread chomping down on a tiny transaction receipt scroll, a bot-shaped mascot squeezing it, mustard splashing."),
+ "t20": ("threat", "A sneaky chameleon creature in a crown and a moderator's armband holding a fake badge, a direct-message envelope glowing with red urgency, a crooked spelling of nothing."),
+ "t21": ("threat", "A reporter owl creature with a microphone and a satellite-dish backpack standing on the moon's surface, a news-van, a question-mark-shaped crater."),
+ "t22": ("threat", "An archaeologist mole creature with a pith helmet and a brush digging up a crumbling roadmap scroll from a fossil layer, a tiny Q4 fossil shaped like a question mark."),
+ "t23": ("threat", "A bear creature with its shorts literally on fire running from a green rocket candle, a bucket of water just out of reach, scorched exchange tickets."),
+ "t24": ("threat", "A huge grizzly bear monster in reading glasses holding a thick folder of printed screenshots, long claws out, a red marker pen, a courtroom bench."),
+ "t25": ("threat", "A stern banana creature in an auditor's visor and sleeve garters stamping a cookbook of accounts over a frying pan, a green unripe banana flag, an abacus."),
+ "t26": ("threat", "A government-ministry building shaped like a crying face with its columns as teeth, a flag of a tear drop, a rubber stamp the size of a car, filing cabinets overflowing."),
+ "b01": ("boss", "A skeletal chairman in a pinstripe suit at the head of a long boardroom table, every chair holding a skeleton, a bullish green arrow chart on the wall, candles."),
+ "b02": ("boss", "A glowing radioactive mutant blob monster clutching a bag of coins to its chest inside a collapsing nuclear plant, warning trefoils, decaying walls, green ooze."),
+ "b03": ("boss", "A one-eyed crystalline monster made of a single rare gem on a committee table surrounded by empty microphones and name plates with no writing, spotlight."),
+ "b04": ("boss", "A giant building-sized monster made of floor tiles and marble that is eating the floor itself, cranes, a tiny demolition ball, a shop floor peeling up into its mouth."),
+ "b05": ("boss", "A cult of hooded faceless figures around a giant emergency-broadcast siren with a television for a head, stripes of warning colour, candles, a satellite dish altar."),
+ "b06": ("boss", "A trench coat standing by itself with three raccoon creatures stacked inside it wearing a top hat, a briefcase of burning banknotes, a stock-exchange floor."),
 }
 
 def comfy_up() -> bool:
@@ -145,7 +182,7 @@ def to_webp(src: Path, cid: str, px: int = 512) -> Path:
 def write_index() -> None:
     ids = sorted(p.stem for p in OUT.glob("*.webp"))
     (ROOT / "packages/client/src/art.ts").write_text(
-        "// Generated by scripts/card-art.py — the cards with their own picture (every non-Threat). Threats star a real Chog.\n"
+        "// Generated by scripts/card-art.py — the cards with their own picture (every card). Threats also keep a real-Chog casting credit.\n"
         f"export const ART: ReadonlySet<string> = new Set({json.dumps(ids)});\n")
     print(f"art.ts: {len(ids)} cards")
 
