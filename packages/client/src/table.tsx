@@ -1,21 +1,25 @@
 // The table: seats, the floor (fight panel), your hand and the actions the engine offers, the stands and the ticker.
 // The client never computes rules. Everything clickable comes from view.legal.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Action, CardView, SeatId, SeatView, TableInfo, View } from "@ruglife/protocol";
 import { formatUnits, parseUnits } from "viem";
 import { act, request, useNet, type NetState } from "./net.js";
 import { Card, ChogFace, imageUrl, powerParts, powerTitle, ROLE_INFO, roleLabel } from "./cards.js";
 import { GlobalAlert } from "./alert.js";
 import type { NewsLine } from "./news.js";
-import { Track, Headline } from "./track.js";
+import { Track, Headline, matchPoint } from "./track.js";
 import { LiveCoach } from "./coach.js";
 import { fund, KIND, TRIGGER } from "./wallet.js";
+import { tokenById } from "@ruglife/cards";
+import { useMyChogs } from "./chogs.js";
+import { sitWithChog } from "./lobby.js";
+import type { Moment } from "./moments.js";
 
 export const PHASE_LABEL: Record<View["phase"], string> = {
   lobby: "Dealing", "turn.start": "Start trouble", "fight.setup": "Fight: set-up", "fight.pileOn": "Fight: pile-on", "fight.rug": "Sealed Rug choices", "fight.jeet": "Jeet",
   "turn.free": "Free play", "turn.airdrop": "Airdrop", over: "GLOBAL ALERT",
 };
-const DEADLINE_MS: Record<string, number> = { lobby: 120_000, prompt: 30_000, "fight.pileOn": 30_000, turn: 60_000 }; // mirrors the server's ⚙ DEADLINES (priority 30 s since 2026-10-12)
+const DEADLINE_MS: Record<string, number> = { lobby: 120_000, prompt: 30_000, airdrop: 60_000, "fight.pileOn": 30_000, turn: 60_000 }; // mirrors the server's ⚙ DEADLINES (priority 30 s since 2026-10-12; airdrop 60 s since 2026-10-22)
 
 export function TableScreen({ id }: { id: string }) {
   const net = useNet();
@@ -26,12 +30,21 @@ export function TableScreen({ id }: { id: string }) {
   }, [id, net.status, !!view]);
   if (!info && !view) return <div className="panel">Looking for table {id}…</div>;
   if (!view) return <PreGame info={info!} net={net} />;
-  return <TablePane view={view} info={info ?? null} news={net.news[id] ?? []} at={net.viewAt[id] ?? Date.now()} onAct={(a) => act(id, a)} address={net.address} pending={net.pending?.table === id ? net.pending.type : null} />;
+  return <TablePane view={view} info={info ?? null} news={net.news[id] ?? []} moments={net.moments[id] ?? []} at={net.viewAt[id] ?? Date.now()} onAct={(a) => act(id, a)} address={net.address} pending={net.pending?.table === id ? net.pending.type : null} />;
 }
 
 function PreGame({ info, net }: { info: TableInfo; net: NetState }) {
   const me = info.seats.find((s) => s.you);
   const host = info.host === net.session;
+  const { mine, pick } = useMyChogs();
+  const sitHere = (loaner: boolean): void => {
+    const go = async () => {
+      if (loaner) { await request({ type: "sit", table: info.id, loaner: true }, "table"); return; }
+      if (!net.address) throw new Error("Sign in first (top right), then sit with your Chog.");
+      await sitWithChog(info.id, pick, mine);
+    };
+    go().catch((e) => alert((e as Error).message));
+  };
   return (
     <div className="panel">
       <h2>{info.name} <span className="chip">{info.mode}</span> {!info.timers ? <span className="chip">no clock</span> : null}</h2>
@@ -40,8 +53,9 @@ function PreGame({ info, net }: { info: TableInfo; net: NetState }) {
         {info.seats.length === 0 ? <span className="muted">no one seated yet</span> : null}
       </div>
       <div className="actions">
-        {!me && info.seats.length < info.maxSeats ? <button className="btn purple" onClick={() => sitHere(info.id, false)}>Sit with your Chog</button> : null}
-        {!me && info.seats.length < info.maxSeats ? <button className="btn ghost" onClick={() => sitHere(info.id, true)}>Sit with a loaner</button> : null}
+        {!me && info.seats.length < info.maxSeats ? <button className="btn purple" disabled={!!net.address && mine === null} onClick={() => sitHere(false)}>{!net.address ? "Sign in and sit with your Chog" : mine === null ? "reading your Chogs…" : pick !== null ? `Sit with ${tokenById(pick)?.name ?? "your Chog"}` : "No Chog in this wallet"}</button> : null}
+        {!me && info.seats.length < info.maxSeats && mine && mine.length > 1 ? <a href="#/" className="muted" style={{ fontSize: 12 }}>(play as another of your Chogs: pick it in the lobby)</a> : null}
+        {!me && info.seats.length < info.maxSeats ? <button className="btn ghost" onClick={() => sitHere(true)}>Sit with a loaner</button> : null}
         {host ? <button className="btn ghost" disabled={info.seats.length >= info.maxSeats} onClick={() => request({ type: "addBot", table: info.id }, "table").catch(() => {})}>Add a bot</button> : null}
         {host ? <button className="btn big green" disabled={info.seats.length < 2} onClick={() => request({ type: "start", table: info.id }, "tables").catch(() => {})}>Deal</button> : <span className="muted">Waiting for the host to deal{info.seats.length < 2 ? " (two seats at least)" : ""}.</span>}
         {me ? <button className="btn small red" onClick={() => request({ type: "leave", table: info.id }, "table").then(() => { location.hash = "#/"; }).catch(() => {})}>Leave</button> : null}
@@ -50,23 +64,12 @@ function PreGame({ info, net }: { info: TableInfo; net: NetState }) {
     </div>
   );
 }
-/** Sit at this table: a loaner, or the Chog picked in the lobby (sign-in required; the server checks the owner). */
-function sitHere(table: string, loaner: boolean): void {
-  let pick: number | null = null;
-  try { const v = localStorage.getItem("ruglife.chog"); pick = v ? Number(v) : null; } catch { /* ignore */ }
-  const go = async () => {
-    if (loaner) { await request({ type: "sit", table, loaner: true }, "table"); return; }
-    if (pick === null) throw new Error("pick one of your Chogs in the lobby first, or sit with a loaner");
-    await request({ type: "sit", table, tokenId: pick }, "table");
-  };
-  go().catch((e) => alert((e as Error).message));
-}
 /** TableInfo seats carry the metadata name "CHOG #<file>"; the file is the marketplace number. */
 const fileFromName = (name: string): number => Number(/#(\d+)/.exec(name)?.[1] ?? 1);
 
-export interface PaneProps { view: View; info: TableInfo | null; news: NewsLine[]; at: number; onAct: (a: Action) => void; address: `0x${string}` | null; practice?: boolean; coach?: React.ReactNode; /** the action type in flight (sent, no view back yet) */ pending?: string | null }
+export interface PaneProps { view: View; info: TableInfo | null; news: NewsLine[]; moments?: Moment[]; at: number; onAct: (a: Action) => void; address: `0x${string}` | null; practice?: boolean; coach?: React.ReactNode; /** the action type in flight (sent, no view back yet) */ pending?: string | null }
 
-export function TablePane({ view, info, news, at, onAct, address, practice, coach, pending }: PaneProps) {
+export function TablePane({ view, info, news, moments, at, onAct, address, practice, coach, pending }: PaneProps) {
   const me = view.viewer === "stands" ? null : view.seats.find((s) => s.seat === view.viewer) ?? null;
   const legal = view.legal;
   const [chooser, setChooser] = useState<{ title: string; options: Array<{ label: string; action: Action }> } | null>(null);
@@ -74,9 +77,11 @@ export function TablePane({ view, info, news, at, onAct, address, practice, coac
   const [trade, setTrade] = useState(false);
   const [alertSeen, setAlertSeen] = useState(false);
   useEffect(() => { setAlertSeen(false); }, [view.winner]);
+  const [showing, setShowing] = useState<Moment | null>(null); // the moment on the floor right now (for the seat it hits)
+  const lastOut = useMemo(() => [...(moments ?? [])].reverse().find((m) => m.out && m.card)?.card ?? null, [moments]);
   const actors = useMemo(() => whoActs(view), [view]);
   const upHuman = actors.map((s) => view.seats.find((x) => x.seat === s)!).filter((s) => s.kind !== "bot" && !s.autopilot);
-  const deadlineMs = info?.timers === false || !upHuman.length ? null : view.phase === "lobby" ? DEADLINE_MS.lobby! : view.prompt ? DEADLINE_MS.prompt! : view.phase === "fight.pileOn" ? DEADLINE_MS["fight.pileOn"]! : DEADLINE_MS.turn!;
+  const deadlineMs = info?.timers === false || !upHuman.length ? null : view.phase === "lobby" ? DEADLINE_MS.lobby! : view.prompt ? (view.prompt.kind === "airdrop" ? DEADLINE_MS.airdrop! : DEADLINE_MS.prompt!) : view.phase === "fight.pileOn" ? DEADLINE_MS["fight.pileOn"]! : DEADLINE_MS.turn!;
   const do_ = (a: Action) => { setChooser(null); setSell(false); setTrade(false); onAct(a); };
   const of = <T extends Action["type"]>(t: T) => legal.filter((a): a is Extract<Action, { type: T }> => a.type === t);
 
@@ -120,7 +125,7 @@ export function TablePane({ view, info, news, at, onAct, address, practice, coac
 
       <Track view={view} me={me} />
       <div className="seats">
-        {view.seats.map((s) => <Seat key={s.seat} s={s} view={view} me={me} up={actors.includes(s.seat)} />)}
+        {view.seats.map((s) => { const hit = showing?.seat === s.seat ? showing : null; return <Seat key={`${s.seat}-${hit ? hit.key : ""}`} s={s} view={view} me={me} up={actors.includes(s.seat)} hit={hit} />; })}
       </div>
 
       <div className="floor">
@@ -133,11 +138,13 @@ export function TablePane({ view, info, news, at, onAct, address, practice, coac
               <div className="decks">
                 <div className="deck trouble"><span>TROUBLE</span><b>{view.decks.trouble}</b><span style={{ fontSize: 10 }}>{view.decks.troubleDiscard} out</span></div>
                 <div className="deck loot"><span>LOOT</span><b>{view.decks.loot}</b><span style={{ fontSize: 10 }}>{view.decks.lootDiscard} out</span></div>
+                {lastOut ? <div className="lastout"><span className="muted" style={{ fontSize: 10 }}>last card out</span><Card card={lastOut} small /></div> : null}
               </div>
               {view.peek ? <div><div className="lower3">Lookout: the top Trouble card</div><div style={{ marginTop: 6 }}><Card card={view.peek} small /></div></div> : null}
             </div>
           </>
         )}
+        <Moments moments={moments ?? []} view={view} onShowing={setShowing} />
       </div>
 
       <div className="side">
@@ -179,7 +186,7 @@ export function TablePane({ view, info, news, at, onAct, address, practice, coac
       {chooser ? <div className="overlay" onClick={() => setChooser(null)}><div className="modal" onClick={(e) => e.stopPropagation()}><h2>{chooser.title}</h2><div className="choices">{chooser.options.map((o, i) => <button className="btn" key={i} onClick={() => do_(o.action)}>{o.label}</button>)}<button className="btn ghost" onClick={() => setChooser(null)}>Never mind</button></div></div></div> : null}
       {sell && me && sellable ? <SellModal me={me} legal={sellable} onDone={do_} onClose={() => setSell(false)} /> : null}
       {trade && me ? <TradeModal view={view} me={me} offers={trades} onDone={do_} onClose={() => setTrade(false)} /> : null}
-      {promptMine && me ? <Prompt view={view} me={me} onDone={do_} /> : null}
+      {promptMine && me ? <Prompt view={view} me={me} onDone={do_} deadline={deadlineMs ? { ms: deadlineMs, at } : null} /> : null}
       {view.phase === "over" && !alertSeen ? <GlobalAlert view={view} onClose={() => setAlertSeen(true)} practice={practice ?? false} /> : null}
     </div>
   );
@@ -211,12 +218,14 @@ function Clock({ ms, at }: { ms: number; at: number }) {
   return <span className="row" title="the server's clock; silence is a pass / the default"><span className="clock"><div style={{ width: `${(100 * left) / ms}%`, background: left < 8000 ? "var(--red)" : "var(--green)" }} /></span><span className="mono">{Math.ceil(left / 1000)}s</span></span>;
 }
 
-function Seat({ s, view, me, up }: { s: SeatView; view: View; me: SeatView | null; up: boolean }) {
+function Seat({ s, view, me, up, hit }: { s: SeatView; view: View; me: SeatView | null; up: boolean; hit: Moment | null }) {
   const isMe = me?.seat === s.seat;
   const helper = view.fight?.helpers.find((h) => h.seat === s.seat);
   const fighter = view.fight?.fighter === s.seat;
+  const shake = hit && (hit.kind === "fud" || hit.kind === "bad" || hit.kind === "rekt" || hit.kind === "lost" || (hit.kind === "jeet" && hit.tone === "red"));
+  const pop = hit && (hit.kind === "won" || hit.kind === "levelup" || hit.kind === "rug");
   return (
-    <div className={`seat ${up ? "up" : ""} ${isMe ? "me" : ""}`}>
+    <div className={`seat ${up ? "up" : ""} ${isMe ? "me" : ""} ${shake ? "hit" : ""} ${pop ? "pop" : ""}`}>
       <div className="head">
         <a href={`#/chog/${s.chog.tokenId}`} title="the Chog sheet"><img className="pfp" src={imageUrl(s.chog.file)} alt="" /></a>
         <div>
@@ -261,8 +270,10 @@ function Fight({ view, me }: { view: View; me: SeatView | null }) {
   const mineSide = me !== null && side.some((s) => s.seat === me.seat);
   const verdict = diff > 0 ? `${mineSide ? "YOU ARE" : nameOf(view, f.fighter).toUpperCase() + " IS"} WINNING BY ${diff}` : diff === 0 ? (muscle ? "TIED — THE MUSCLE WINS IT" : "TIED — A TIE LOSES") : `${mineSide ? "YOU ARE" : nameOf(view, f.fighter).toUpperCase() + " IS"} LOSING BY ${-diff}`;
   const sgn = (n: number): string => (n >= 0 ? `+${n}` : `${n}`);
+  const mp = matchPoint(view);
   return (
     <div className="col">
+      {mp ? <div className="matchpoint">MATCH POINT · {mp.seat === me?.seat ? "win this fight and YOU take the world" : `${mp.name} takes the world if this fight is won${me && view.phase === "fight.pileOn" && f.priority === me.seat ? " — your priority: play on the threat side or pass" : ""}`}</div> : null}
       <div className="row"><span className="live">LIVE</span><span className="lower3">{nameOf(view, f.fighter)}{f.helpers.length ? ` + ${f.helpers.map((h) => nameOf(view, h.seat)).join(" + ")}` : ""} vs {threat.name}</span><span className={`verdict ${win ? "win" : "lose"}`}>{verdict}</span>{f.pendingAsk ? <span className="chip">asking {nameOf(view, f.pendingAsk.to)} for {f.pendingAsk.cut} bags…</span> : null}{f.rugPending.length ? <span className="chip" style={{ background: "var(--red)" }}>sealed choices: {f.rugPending.map((s) => nameOf(view, s)).join(", ")}</span> : null}</div>
       <div className="fight">
         <div className="side-box">
@@ -295,15 +306,18 @@ const sideHasMuscle = (view: View): boolean => {
   return sides.some((s) => s.playRole === "muscle") || f.plays.some((p) => !p.cancelled && p.card.def.effects.some((e) => e.kind === "countAs" && e.role === "muscle"));
 };
 
-function Prompt({ view, me, onDone }: { view: View; me: SeatView; onDone: (a: Action) => void }) {
+function Prompt({ view, me, onDone, deadline }: { view: View; me: SeatView; onDone: (a: Action) => void; deadline: { ms: number; at: number } | null }) {
   const p = view.prompt!;
   const legal = view.legal;
+  // the clock inside the modal (the strip's clock is under the overlay): what silence does, and how long you have
+  const silent = p.kind === "rug" ? "keeps your Rug" : p.kind === "answerHelp" ? "declines" : p.kind === "airdrop" ? "keeps the first six" : p.kind === "tradeAnswer" ? "declines" : "picks for you";
+  const clock = deadline ? <div className="row promptclock"><Clock key={`${view.seq}`} ms={deadline.ms} at={deadline.at} /><span className="muted" style={{ fontSize: 12 }}>when the clock runs out, silence {silent}</span></div> : null;
   const [keep, setKeep] = useState<string[]>(() => (legal.find((a) => a.type === "AIRDROP_KEEP") as Extract<Action, { type: "AIRDROP_KEEP" }> | undefined)?.cards ?? []);
   if (p.kind === "rug") {
     const f = view.fight!;
     return (
       <div className="overlay"><div className="modal rug">
-        <h2>THE RUG</h2>
+        <h2>THE RUG</h2>{clock}
         <div>The fight is won: <b>{f.threat.def.levelsWon ?? 1} level{(f.threat.def.levelsWon ?? 1) === 1 ? "" : "s"}</b> to {nameOf(view, f.fighter)}, <b>{f.threat.def.bags} bags</b> split by the cuts. You still hold your Rug. Choose in secret; the choices are revealed together.</div>
         <ul style={{ margin: "8px 0" }}><li><b>Keep</b>: the cuts stand. Your Rug stays for later.</li><li><b>Pull</b>: if you are the only one who pulls, you take every bag and every level of this fight. If two or more pull, the bag tears: nothing for anyone. A pulled Rug is spent for the game and written on your Chog's record.</li></ul>
         <div className="choices">
@@ -318,7 +332,7 @@ function Prompt({ view, me, onDone }: { view: View; me: SeatView; onDone: (a: Ac
     const ask = f.pendingAsk!;
     return (
       <div className="overlay"><div className="modal">
-        <h2>{nameOf(view, f.fighter)} asks for your help</h2>
+        <h2>{nameOf(view, f.fighter)} asks for your help</h2>{clock}
         <div className="row" style={{ alignItems: "flex-start" }}><Card card={f.threat} small /><div>Against <b>{f.threat.def.name}</b> (power {f.power.threat}; their side {f.power.fighter} now, <b>{f.power.fighter + powerParts(me).total}</b> with your {powerParts(me).total}). Your cut: <b>{ask.cut} of {f.threat.def.bags} bags</b>. Levels go to the fighter. If the fight is lost you roll to jeet too. If it is won, anyone still holding a Rug may pull it.</div></div>
         <div className="choices"><button className="btn big green" onClick={() => onDone({ type: "ANSWER_HELP", seat: me.seat, accept: true })}>I'm in for {ask.cut}</button><button className="btn big ghost" onClick={() => onDone({ type: "ANSWER_HELP", seat: me.seat, accept: false })}>Not my fight</button></div>
       </div></div>
@@ -326,7 +340,7 @@ function Prompt({ view, me, onDone }: { view: View; me: SeatView; onDone: (a: Ac
   }
   if (p.kind === "tradeAnswer") {
     return (
-      <div className="overlay"><div className="modal"><h2>A trade is offered</h2><div>Another player offers a gear swap. Accept?</div><div className="choices"><button className="btn big green" onClick={() => onDone({ type: "TRADE_ANSWER", seat: me.seat, accept: true })}>Accept</button><button className="btn big ghost" onClick={() => onDone({ type: "TRADE_ANSWER", seat: me.seat, accept: false })}>Decline</button></div></div></div>
+      <div className="overlay"><div className="modal"><h2>A trade is offered</h2>{clock}<div>Another player offers a gear swap. Accept?</div><div className="choices"><button className="btn big green" onClick={() => onDone({ type: "TRADE_ANSWER", seat: me.seat, accept: true })}>Accept</button><button className="btn big ghost" onClick={() => onDone({ type: "TRADE_ANSWER", seat: me.seat, accept: false })}>Decline</button></div></div></div>
     );
   }
   if (p.kind === "airdrop") {
@@ -334,8 +348,8 @@ function Prompt({ view, me, onDone }: { view: View; me: SeatView; onDone: (a: Ac
     const toggle = (inst: string) => setKeep((k) => (k.includes(inst) ? k.filter((x) => x !== inst) : k.length >= 6 ? k : [...k, inst]));
     return (
       <div className="overlay"><div className="modal">
-        <h2>Airdrop: keep 6</h2>
-        <div>You hold {hand.length}. Pick the 6 to keep; the rest drop to the lowest-level player (a Sob Story first; you discard if that is you).</div>
+        <h2>Airdrop: keep 6</h2>{clock}
+        <div>You hold {hand.length}. Pick the 6 to keep; the rest are charity: they drop to the lowest-level player (a Sob Story first; you discard if that is you).</div>
         <div className="handrow" style={{ marginTop: 8 }}>{hand.map((c) => <Card key={c.inst} card={c} small selected={keep.includes(c.inst)} className={keep.includes(c.inst) ? "" : "dim"} badge={keep.includes(c.inst) ? "KEEP" : undefined} onClick={() => toggle(c.inst)} />)}</div>
         <div className="choices"><button className="btn big" disabled={keep.length !== Math.min(6, hand.length)} onClick={() => onDone({ type: "AIRDROP_KEEP", seat: me.seat, cards: keep })}>Keep these {keep.length}</button></div>
       </div></div>
@@ -344,7 +358,7 @@ function Prompt({ view, me, onDone }: { view: View; me: SeatView; onDone: (a: Ac
   if (p.kind === "pickRole" || p.kind === "pickSkin") {
     const opts = legal.filter((a) => a.type === "PICK_ROLE" || a.type === "PICK_SKIN");
     return (
-      <div className="overlay"><div className="modal"><h2>{p.kind === "pickRole" ? "A Legend picks a role" : "A rare skin picks a colour"}</h2><div className="choices">{opts.map((a, i) => <button className="btn" key={i} onClick={() => onDone(a)}>{a.type === "PICK_ROLE" ? `${roleLabel(a.role)} — ${ROLE_INFO[a.role].perk}` : a.type === "PICK_SKIN" ? a.skin : ""}</button>)}</div></div></div>
+      <div className="overlay"><div className="modal"><h2>{p.kind === "pickRole" ? "A Legend picks a role" : "A rare skin picks a colour"}</h2>{clock}<div className="choices">{opts.map((a, i) => <button className="btn" key={i} onClick={() => onDone(a)}>{a.type === "PICK_ROLE" ? `${roleLabel(a.role)} — ${ROLE_INFO[a.role].perk}` : a.type === "PICK_SKIN" ? a.skin : ""}</button>)}</div></div></div>
     );
   }
   return null;
@@ -412,6 +426,48 @@ function Stands({ info, view, address }: { info: TableInfo; view: View; address:
           ) : null}
         </>
       )}
+    </div>
+  );
+}
+
+/** The floor's spotlight: the newest moments one at a time, each for its beat (shorter when several queue up). Click skips one. */
+function Moments({ moments, view, onShowing }: { moments: Moment[]; view: View; onShowing: (m: Moment | null) => void }) {
+  const [queue, setQueue] = useState<Moment[]>([]);
+  const [now, setNow] = useState<Moment | null>(null);
+  const seen = useRef<number>(-1);
+  const mounted = useRef(false);
+  useEffect(() => {
+    // on arrival at a table, what already happened is history, not a show
+    if (!mounted.current) { mounted.current = true; seen.current = moments.length ? moments[moments.length - 1]!.key : -1; return; }
+    const fresh = moments.filter((m) => m.key > seen.current);
+    if (!fresh.length) return;
+    seen.current = fresh[fresh.length - 1]!.key;
+    setQueue((q) => [...q, ...fresh].slice(-8));
+  }, [moments]);
+  useEffect(() => {
+    if (now || !queue.length) return;
+    const [head, ...rest] = queue;
+    setQueue(rest);
+    setNow(head!);
+  }, [queue, now]);
+  useEffect(() => {
+    if (!now) { onShowing(null); return; }
+    onShowing(now);
+    const ms = Math.max(800, now.ms * Math.max(0.4, 1 - 0.18 * queue.length));
+    const t = setTimeout(() => setNow(null), ms);
+    return () => clearTimeout(t);
+  }, [now]);
+  useEffect(() => { setQueue([]); setNow(null); }, [view.tableId]);
+  if (!now) return null;
+  const seat = now.seat !== null ? view.seats.find((s) => s.seat === now.seat) ?? null : null;
+  return (
+    <div className={`moment ${now.tone} ${now.kind}`} onClick={() => setNow(null)} title="click to skip">
+      {now.card ? <Card card={now.card} /> : null}
+      <div className="mtext">
+        {seat ? <div className="row" style={{ justifyContent: "center", marginBottom: 6 }}><img className="mface" src={imageUrl(seat.chog.file)} alt="" /><span className="mwho">{seat.chog.name}{seat.seat === view.viewer ? " (you)" : ""}</span></div> : null}
+        <div className="mtitle">{now.title}</div>
+        {now.sub ? <div className="msub">{now.sub}</div> : null}
+      </div>
     </div>
   );
 }

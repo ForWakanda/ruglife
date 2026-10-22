@@ -1,4 +1,5 @@
 // The coach on a live table (on by default, dismissible) and the one-screen rules.
+import { matchPoint } from "./track.js";
 import { useState } from "react";
 import type { SeatView, View } from "@ruglife/protocol";
 import { ROLE_INFO, roleLabel } from "./cards.js";
@@ -35,8 +36,9 @@ export function LiveCoach({ view, me, actors }: { view: View; me: SeatView | nul
     else { title = "Too strong alone"; body = <>Power {f.power.fighter} against {f.power.threat}. <b>Ask for help</b>, play a +N card from your hand, or fight anyway and roll to jeet if you lose (5+ on a die{me.playRole === "lookout" ? ", +2 for a Lookout" : ""}).</>; }
   }
   else if (f && view.phase === "fight.pileOn" && mine) {
-    title = "Your priority";
-    body = <>Anyone may pile on: a one-shot on either side, a Boost on the Threat, or <b>Pass</b>. {f.fighter === me.seat ? "Your fight: play for yourself or pass." : `${nameOf(view, f.fighter)} is fighting: help them, or make the Threat stronger.`} The fight resolves after everyone passes in a row.</>;
+    const mp = matchPoint(view);
+    title = mp && mp.seat !== me.seat ? "LAST CHANCE: this fight is the game" : "Your priority";
+    body = mp && mp.seat !== me.seat ? <><b>{mp.name}</b> reaches level 10 and wins if this fight is won. Glowing cards in your hand can still go on the threat's side (a Boost, or a one-shot "→ the threat"). Pass, and if nobody else stops it, it is over.</> : <>Anyone may pile on: a one-shot on either side, a Boost on the Threat, or <b>Pass</b>. {f.fighter === me.seat ? "Your fight: play for yourself or pass." : `${nameOf(view, f.fighter)} is fighting: help them, or make the Threat stronger.`} The fight resolves after everyone passes in a row.</>;
   }
   else if (f && !mine) { title = `${nameOf(view, f.fighter)} is fighting`; body = <>Watch the two numbers. If they ask you for help, you get a cut of the bags.</>; }
   else if (view.phase === "turn.start" && mine) { title = `You are a ${roleLabel(me.playRole)}`; body = <><div>{ROLE_INFO[me.playRole ?? "face"].perk}</div><div style={{ marginTop: 4 }}>Click <b>Start trouble</b>: a Threat means a fight, FUD hits you, anything else goes to your hand.</div></>; }

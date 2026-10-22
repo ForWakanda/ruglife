@@ -6,12 +6,14 @@ import { apply, botAction, createGame, DEFAULT_CARD_SET, viewFor, type GameState
 import { cardSetV0, tokenById, tokens } from "@ruglife/cards";
 const hasLock = (defId: string): boolean => (cardSetV0.cards.find((c) => c.id === defId)?.lock?.length ?? 0) > 0;
 import { newsLines, type NewsLine } from "./news.js";
+import { momentsOf, type Moment } from "./moments.js";
 import { TablePane, whoActs } from "./table.js";
 import { ROLE_INFO, roleLabel } from "./cards.js";
 import { useNet } from "./net.js";
+import { pickedChog } from "./chogs.js";
 
 const ME = 0;
-const BOT_DELAY = 650;
+const BOT_DELAY = 1100; // ⚙ a beat per bot move, so each moment on the floor gets seen (650 ms before 2026-10-22)
 
 /** The locked Threat the learner will lack the role for, and the bot that has it. */
 function plan(learnerRole: string): { helperRole: "hacker" | "face" | "sob"; locked: string } {
@@ -56,7 +58,7 @@ interface Milestones { fought: boolean; locked: boolean; helped: boolean; rugSee
 
 export function Practice() {
   const net = useNet();
-  const picked = useMemo<number | null>(() => { try { const v = localStorage.getItem("ruglife.chog"); return v ? Number(v) : null; } catch { return null; } }, []);
+  const picked = useMemo<number | null>(() => pickedChog(), []); // the Chog you play as (validated against the wallet by the lobby)
   const [run, setRun] = useState(0);
   const learnerToken = picked !== null && tokenById(picked) ? picked : pickToken("face", new Set());
   const learner = tokenById(learnerToken)!;
@@ -70,10 +72,11 @@ export function Practice() {
   }, [learnerToken, run, p.helperRole, learnerRole, picked]);
   const [state, setState] = useState<GameState>(() => start(config, p.locked));
   const [news, setNews] = useState<NewsLine[]>([]);
+  const [moments, setMoments] = useState<Moment[]>([]);
   const [at, setAt] = useState(Date.now());
   const [ms, setMs] = useState<Milestones>({ fought: false, locked: false, helped: false, rugSeen: false, jeet: false, free: false, over: false });
   const lastEvents = useRef<SeqEvent[]>([]);
-  useEffect(() => { setState(start(config, p.locked)); setNews([]); setMs({ fought: false, locked: false, helped: false, rugSeen: false, jeet: false, free: false, over: false }); lastEvents.current = []; }, [config, p.locked]);
+  useEffect(() => { setState(start(config, p.locked)); setNews([]); setMoments([]); setMs({ fought: false, locked: false, helped: false, rugSeen: false, jeet: false, free: false, over: false }); lastEvents.current = []; }, [config, p.locked]);
 
   const view = useMemo(() => viewFor(state, ME), [state]);
   const step = (a: Action): void => {
@@ -82,7 +85,10 @@ export function Practice() {
       lastEvents.current = r.events;
       setState(r.state);
       setAt(Date.now());
-      setNews((n) => [...n, ...newsLines(viewFor(r.state, ME), r.events)].slice(-120));
+      const v = viewFor(r.state, ME);
+      const castOf = (inst: string) => { const ci = r.state.cards[inst]; const t = ci ? tokenById(ci.cast) : undefined; return t ? { tokenId: t.tokenId, file: t.file, name: t.name } : null; };
+      setNews((n) => [...n, ...newsLines(v, r.events)].slice(-120));
+      setMoments((m) => [...m, ...momentsOf(v, r.events, castOf)].slice(-40));
       setMs((m) => milestones(m, r.events, a, ME, p.locked));
     } catch (e) { alert((e as Error).message); }
   };
@@ -98,7 +104,7 @@ export function Practice() {
   }, [state]);
 
   const coach = <Coach view={view} ms={ms} learnerRole={learnerRole} helperRole={p.helperRole} locked={p.locked} onRestart={() => setRun((r) => r + 1)} />;
-  return <TablePane view={view} info={{ id: config.tableId, name: "Practice table", mode: "standard", status: state.phase === "over" ? "over" : "playing", host: "", seats: [], maxSeats: 3, timers: false, createdAt: 0 }} news={news} at={at} onAct={step} address={net.address} practice coach={coach} />;
+  return <TablePane view={view} info={{ id: config.tableId, name: "Practice table", mode: "standard", status: state.phase === "over" ? "over" : "playing", host: "", seats: [], maxSeats: 3, timers: false, createdAt: 0 }} news={news} moments={moments} at={at} onAct={step} address={net.address} practice coach={coach} />;
 }
 
 function start(config: GameConfig, locked: string): GameState {

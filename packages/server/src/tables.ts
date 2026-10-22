@@ -7,7 +7,7 @@ import type { Store } from "./store.js";
 import { eventDigestOf, type EscrowLink } from "./escrow-link.js";
 
 export const MAX_SEATS = 6;
-export const DEADLINES = { priority: 30_000, prompt: 30_000, turn: 60_000, lobby: 120_000 } as const; // ⚙ rules § 5–6; priority 20 s → 30 s 2026-10-12 (the first human table timed out twice while reading)
+export const DEADLINES = { priority: 30_000, prompt: 30_000, airdrop: 60_000, turn: 60_000, lobby: 120_000 } as const; // ⚙ rules § 5–6; priority 20 s → 30 s 2026-10-12 (the first human table timed out twice while reading); airdrop 60 s 2026-10-22 (the user was still choosing what to keep at 30 s — table f1b74cc6)
 /** ⚙ Bots act one move per beat on clocked tables so humans can follow; a pass is quicker. Instant on `timers:false` tables and in tests. */
 export const BOT_PACE = { move: 1_400, pass: 600 } as const;
 
@@ -222,7 +222,7 @@ export class Table {
     const who = this.actors().filter((seat) => !this.isAuto(seat));
     const seat = who[0];
     if (seat === undefined) return;
-    const ms = s.phase === "lobby" ? DEADLINES.lobby : s.prompt ? DEADLINES.prompt : s.phase === "fight.pileOn" ? DEADLINES.priority : DEADLINES.turn;
+    const ms = s.phase === "lobby" ? DEADLINES.lobby : s.prompt ? (s.prompt.kind === "airdrop" ? DEADLINES.airdrop : DEADLINES.prompt) : s.phase === "fight.pileOn" ? DEADLINES.priority : DEADLINES.turn;
     this.deadlineSeat = seat;
     this.timer = setTimeout(() => this.onDeadline(seat), ms);
     this.timer.unref?.();

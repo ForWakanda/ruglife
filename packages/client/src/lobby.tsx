@@ -1,30 +1,36 @@
 // The lobby: tables, your Chogs, loaners, bots, pilot keys. Sitting with a Chog is a signature check, never a transaction.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { TableInfo } from "@ruglife/protocol";
 import { tokenById } from "@ruglife/cards";
 import { request, send, useNet } from "./net.js";
-import { chogsOf, hasWallet, registerPilot, signIn } from "./wallet.js";
+import { hasWallet, registerPilot, signIn } from "./wallet.js";
 import { imageUrl, roleLabel } from "./cards.js";
 import { HowToPlay } from "./coach.js";
+import { refreshChogs, setPick, useMyChogs } from "./chogs.js";
 
-const PICK_KEY = "ruglife.chog";
+/** Sits the picked Chog at a table. A refusal because the Chog left the wallet re-reads the chain and says what is held now. */
+export async function sitWithChog(table: string, pick: number | null, mine: number[] | null): Promise<void> {
+  if (pick === null) throw new Error(mine && mine.length === 0 ? "No Chog Genesis in this wallet: sit with a loaner, or get a pilot key from a holder." : "Pick one of your Chogs first, or sit with a loaner.");
+  try {
+    await request({ type: "sit", table, tokenId: pick }, "table");
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (!msg.startsWith("notOwner")) throw e;
+    const now = await refreshChogs();
+    const names = now.map((id) => tokenById(id)?.name ?? `#${id}`);
+    throw new Error(`${tokenById(pick)?.name ?? `#${pick}`} is not in this wallet any more. ${now.length ? `This wallet holds ${names.join(", ")}: ${now.length === 1 ? "it is picked now, click Sit again." : "pick one and click Sit again."}` : "No Chog Genesis here: sit with a loaner."}`);
+  }
+}
 
 export function Lobby() {
   const net = useNet();
-  const [mine, setMine] = useState<number[] | null>(null);
-  const [pick, setPick] = useState<number | null>(() => { try { const v = localStorage.getItem(PICK_KEY); return v ? Number(v) : null; } catch { return null; } });
+  const { mine, pick } = useMyChogs();
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"standard" | "tournament">("standard");
   const [timers, setTimers] = useState(true);
   const [pilotId, setPilotId] = useState("");
   const [pilotAddr, setPilotAddr] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!net.address) { setMine(null); return; }
-    chogsOf(net.address).then(setMine).catch(() => setMine([]));
-  }, [net.address]);
-  useEffect(() => { try { if (pick !== null) localStorage.setItem(PICK_KEY, String(pick)); } catch { /* ignore */ } }, [pick]);
 
   const go = (id: string) => { location.hash = `#/t/${id}`; };
   const run = async (label: string, f: () => Promise<unknown>) => {
@@ -36,9 +42,8 @@ export function Lobby() {
     go(r.table.id);
   });
   const sitChog = (t: TableInfo) => run(`sit-${t.id}`, async () => {
-    if (!net.address) await signIn();
-    if (pick === null) throw new Error("pick one of your Chogs first (or sit as a loaner)");
-    await request({ type: "sit", table: t.id, tokenId: pick }, "table");
+    if (!net.address) { await signIn(); throw new Error("Signed in. Your Chogs are being read from the chain: pick one and click Sit again."); }
+    await sitWithChog(t.id, pick, mine);
     go(t.id);
   });
   const sitLoaner = (t: TableInfo) => run(`loaner-${t.id}`, async () => { await request({ type: "sit", table: t.id, loaner: true }, "table"); go(t.id); });
@@ -84,7 +89,7 @@ export function Lobby() {
               <div className="col">
                 {t.status === "open" && !t.seats.some((s) => s.you) && t.seats.length < t.maxSeats ? (
                   <>
-                    <button className="btn small purple" disabled={busy !== null} onClick={() => sitChog(t)}>Sit with {pick !== null ? tokenById(pick)?.name ?? "your Chog" : "your Chog"}</button>
+                    <button className="btn small purple" disabled={busy !== null || (!!net.address && mine === null)} onClick={() => sitChog(t)}>{!net.address ? "Sign in and sit with your Chog" : mine === null ? "reading your Chogs…" : pick !== null ? `Sit with ${tokenById(pick)?.name ?? "your Chog"}` : "No Chog in this wallet"}</button>
                     <button className="btn small ghost" disabled={busy !== null} onClick={() => sitLoaner(t)}>Sit with a loaner</button>
                   </>
                 ) : null}
@@ -115,18 +120,25 @@ export function Lobby() {
           ) : mine === null ? <div className="muted">reading the chain…</div> : mine.length === 0 ? (
             <div className="muted">No Chog Genesis in this wallet. Sit with a loaner, or get a pilot key from a holder.</div>
           ) : (
-            <div className="chogpick">
-              {mine.map((id) => { const t = tokenById(id); if (!t) return null; return (
-                <div className={`chog ${pick === id ? "on" : ""}`} key={id} onClick={() => setPick(id)}>
-                  <img src={imageUrl(t.file)} alt={t.name} />
-                  <div style={{ fontWeight: 800, fontSize: 12 }}>{t.name}</div>
-                  <div className="muted" style={{ fontSize: 11 }}>{roleLabel(t.role)}</div>
-                  <a href={`#/chog/${id}`} style={{ fontSize: 11 }} onClick={(e) => e.stopPropagation()}>sheet</a>
-                </div>
-              ); })}
-            </div>
+            <>
+              <div className="row" style={{ marginBottom: 8, justifyContent: "space-between" }}>
+                <span>You play as <b>{pick !== null ? tokenById(pick)?.name : "—"}</b>{mine.length > 1 ? <span className="muted"> · click another to switch</span> : null}</span>
+                <button className="btn small ghost" disabled={busy !== null} onClick={() => run("refresh", () => refreshChogs())}>Re-read wallet</button>
+              </div>
+              <div className="chogpick">
+                {mine.map((id) => { const t = tokenById(id); if (!t) return null; return (
+                  <div className={`chog ${pick === id ? "on" : ""}`} key={id} onClick={() => setPick(id)} title={pick === id ? "the Chog you play as" : "click to play as this Chog"}>
+                    {pick === id ? <span className="stamp badge" style={{ position: "absolute", top: 6, left: -6 }}>PLAYING AS</span> : null}
+                    <img src={imageUrl(t.file)} alt={t.name} />
+                    <div style={{ fontWeight: 800, fontSize: 12 }}>{t.name}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{roleLabel(t.role)}</div>
+                    <a href={`#/chog/${id}`} style={{ fontSize: 11 }} onClick={(e) => e.stopPropagation()}>sheet</a>
+                  </div>
+                ); })}
+              </div>
+            </>
           )}
-          {net.address ? <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>Pilot keys you were given also work: sit with that Chog's tokenId and the server checks the owner's signature.</div> : null}
+          {net.address ? <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>Sold or moved a Chog? Re-read the wallet. Pilot keys you were given also work: sit with that Chog's tokenId and the server checks the owner's signature.</div> : null}
         </div>
         {net.address ? (
           <div className="panel">

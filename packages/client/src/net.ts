@@ -1,7 +1,9 @@
 // One WebSocket to the RUG LIFE server. The client never computes rules: it renders View and offers view.legal.
 import { useSyncExternalStore } from "react";
 import type { Action, ClientMsg, SeqEvent, ServerMsg, TableInfo, View } from "@ruglife/protocol";
+import { tokenById } from "@ruglife/cards";
 import { newsLines, type NewsLine } from "./news.js";
+import { momentsOf, type Moment } from "./moments.js";
 
 export interface NetError { id: number; code: string; detail?: string; at: number }
 export interface NetState {
@@ -11,6 +13,10 @@ export interface NetState {
   tables: TableInfo[];
   views: Record<string, View>;
   news: Record<string, NewsLine[]>;
+  /** the last moments per table (cards flipped, FUD landing, rugs, verdicts) for the floor to show one at a time */
+  moments: Record<string, Moment[]>;
+  /** per table, card instance → the cast Chog's tokenId (from GameStarted; a late watcher has none) */
+  casting: Record<string, Record<string, number>>;
   viewAt: Record<string, number>; // when the latest view of a table arrived (for the client's clock)
   errors: NetError[];
   /** An action sent and not yet answered by a view: the buttons show it. Cleared by the next view or the resync. */
@@ -24,7 +30,7 @@ const here = typeof location !== "undefined" ? location : { port: "", origin: "h
 export const SERVER_HTTP: string = env.VITE_SERVER ?? (here.port === "5173" ? `http://${DEV_SERVER}` : here.origin);
 const SERVER_WS = SERVER_HTTP.replace(/^http/, "ws");
 
-let state: NetState = { status: "connecting", session: null, address: null, tables: [], views: {}, news: {}, viewAt: {}, errors: [], pending: null };
+let state: NetState = { status: "connecting", session: null, address: null, tables: [], views: {}, news: {}, moments: {}, casting: {}, viewAt: {}, errors: [], pending: null };
 /** ⚙ An act with no view back inside this window re-reads the table (a lost click, a stale view after a reconnect). */
 const ACT_RESYNC_MS = 3_000;
 let pendingTimer: number | null = null;
@@ -118,10 +124,15 @@ function onMessage(msg: ServerMsg): void {
     }
     case "view": {
       const prev = state.news[msg.table] ?? [];
-      const lines = msg.events.length ? [...prev, ...newsLines(msg.view, msg.events as SeqEvent[])].slice(-120) : prev;
+      const events = msg.events as SeqEvent[];
+      const lines = events.length ? [...prev, ...newsLines(msg.view, events)].slice(-120) : prev;
+      const started = events.find((e) => e.ev.t === "GameStarted");
+      const casting = started && started.ev.t === "GameStarted" ? started.ev.casting : state.casting[msg.table] ?? {};
+      const castOf = (inst: string) => { const id = casting[inst]; const t = id !== undefined ? tokenById(id) : undefined; return t ? { tokenId: t.tokenId, file: t.file, name: t.name } : null; };
+      const moments = events.length ? [...(state.moments[msg.table] ?? []), ...momentsOf(msg.view, events, castOf)].slice(-40) : state.moments[msg.table] ?? [];
       const pending = state.pending?.table === msg.table ? null : state.pending;
       if (pending === null && pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
-      set({ views: { ...state.views, [msg.table]: msg.view }, news: { ...state.news, [msg.table]: lines }, viewAt: { ...state.viewAt, [msg.table]: Date.now() }, pending });
+      set({ views: { ...state.views, [msg.table]: msg.view }, news: { ...state.news, [msg.table]: lines }, moments: { ...state.moments, [msg.table]: moments }, casting: started ? { ...state.casting, [msg.table]: casting } : state.casting, viewAt: { ...state.viewAt, [msg.table]: Date.now() }, pending });
       break;
     }
     case "error":

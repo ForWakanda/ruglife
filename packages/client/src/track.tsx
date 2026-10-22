@@ -5,6 +5,17 @@ import type { NewsLine } from "./news.js";
 
 const nameOf = (view: View, seat: number): string => view.seats.find((s) => s.seat === seat)?.chog.name ?? `seat ${seat}`;
 
+/** The fight on the floor ends the game if won: the fighter's level plus the Threat's levels reaches 10. (2026-10-22: the user's
+ *  30-s priority on the bot's winning fight passed unused — nothing said THIS fight was the game.) */
+export function matchPoint(view: View): { seat: number; name: string; levels: number } | null {
+  const f = view.fight;
+  if (!f || view.phase === "over") return null;
+  const fighter = view.seats.find((s) => s.seat === f.fighter);
+  if (!fighter) return null;
+  const levels = f.threat.def.levelsWon ?? 1;
+  return fighter.level + levels >= 10 ? { seat: fighter.seat, name: fighter.chog.name, levels } : null;
+}
+
 /** Every seat on a ladder from the start level to 10. The 10th rung is GLOBAL ALERT. */
 export function Track({ view, me }: { view: View; me: SeatView | null }) {
   const start = view.mode === "tournament" ? 6 : 1;
@@ -49,7 +60,10 @@ export function Headline({ view, me, actors, news }: { view: View; me: SeatView 
   else if (f) {
     const threat = f.threat.def.name;
     const fighter = f.fighter === me?.seat ? "You are" : `${nameOf(view, f.fighter)} is`;
-    if (view.phase === "fight.setup") line = mine ? `You run into ${threat}. Ask for help, play a card, or Fight!` : `${fighter} setting up a fight with ${threat}.`;
+    const mp = matchPoint(view);
+    if (mp && mp.seat !== me?.seat && view.phase !== "fight.rug") line = mine ? `LAST CHANCE: ${mp.name} takes the world if this fight is won. Play a Boost or a one-shot on the threat side, or it is over.` : `MATCH POINT: ${mp.name} takes the world if this fight is won.`;
+    else if (mp && mp.seat === me?.seat && view.phase !== "fight.rug") line = view.phase === "fight.setup" ? `MATCH POINT: win this fight and you take the world. Ask for help, play a card, or Fight!` : `MATCH POINT: win this and you take the world. The others will pile on against you.`;
+    else if (view.phase === "fight.setup") line = mine ? `You run into ${threat}. Ask for help, play a card, or Fight!` : `${fighter} setting up a fight with ${threat}.`;
     else if (view.phase === "fight.pileOn") line = mine ? `${fighter === "You are" ? "Your fight" : `${nameOf(view, f.fighter)}'s fight`} with ${threat}: pile on for or against, or pass.` : `${nameOf(view, f.priority ?? f.fighter)} is deciding whether to pile on.`;
     else if (view.phase === "fight.rug") line = mine ? "Sealed Rug choices." : "Everyone in the fight seals a Rug choice.";
     else line = `${fighter} fighting ${threat}.`;
