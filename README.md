@@ -6,6 +6,18 @@ Your Chog's eyes decide your job. The whole collection is the deck. Every rug go
 
 **Everything in this repository was written after the Chogathon bell (2026-10-08 15:00Z).** Pre-existing work used: the Chog Genesis collection's own metadata and images (third-party), the rules designed on paper before the bell, and the open-source libraries in `package.json`.
 
+## Testing it (judges)
+
+Live at **https://ruglife.xyz**: nothing to install, no account, no transaction.
+
+1. **Practice (no wallet, ~3 minutes).** Click **Practice first** in the lobby. It is a real game against two bots with a stacked deal and a coach that walks you through a fight, a Lock, a helper, a Rug, a jeet and a free choice. It runs in your browser and writes nothing.
+2. **A live table (no wallet).** In the lobby type a table name, click **Open**, then **Sit with a loaner**, **Add a bot** once or twice, and **Deal**. Loaners are marked LOANER and keep no record. Anyone else can **Watch from the stands** from the stands.
+3. **With a Chog (holders).** Click **Sign in with wallet** (an EIP-4361 signature: no gas, no approval, no transfer), pick one of your Chogs, open or join a table and sit with it. The server reads `ownerOf` live; your Chog's Eyes trait sets your role and its outfit is your kit. Its record is at `#/chog/<tokenId>`. A holder can let a friend play their Chog with a signed, expiring pilot key.
+
+On a live table the clock is real (30 s for priority, 60 s for an airdrop), and silence takes the default shown on screen. First Chog to Level 10 wins: GLOBAL ALERT.
+
+**What is built but switched off on the live site:** the $CHOG pots and bounties. `RugLifeEscrow` and the settlement path are written and tested (unit tests, plus a fork test against the real registry, proxy and $CHOG on Monad mainnet), but no escrow has been deployed, so the stands show no pot.
+
 ## Layout
 
 | Package | What it is |
