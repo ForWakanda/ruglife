@@ -11,7 +11,7 @@ Your Chog's eyes decide your job. The whole collection is the deck. Every rug go
 Live at **https://ruglife.xyz**: nothing to install, no account, no transaction.
 
 1. **Practice (no wallet, ~3 minutes).** Click **Practice first** in the lobby. It is a real game against two bots with a stacked deal and a coach that walks you through a fight, a Lock, a helper, a Rug, a jeet and a free choice. It runs in your browser and writes nothing.
-2. **A live table (no wallet).** In the lobby type a table name, click **Open**, then **Sit with a loaner**, **Add a bot** once or twice, and **Deal**. Loaners are marked LOANER and keep no record. Anyone else can **Watch from the stands** from the stands.
+2. **A live table (no wallet).** In the lobby type a table name, click **Open**, then **Sit with a loaner**, **Add a bot** once or twice, and **Deal**. Loaners are marked LOANER and keep no record. Anyone else can **Watch from the stands** on the same table.
 3. **With a Chog (holders).** Click **Sign in with wallet** (an EIP-4361 signature: no gas, no approval, no transfer), pick one of your Chogs, open or join a table and sit with it. The server reads `ownerOf` live; your Chog's Eyes trait sets your role and its outfit is your kit. Its record is at `#/chog/<tokenId>`. A holder can let a friend play their Chog with a signed, expiring pilot key.
 
 On a live table the clock is real (30 s for priority, 60 s for an airdrop), and silence takes the default shown on screen. First Chog to Level 10 wins: GLOBAL ALERT.
